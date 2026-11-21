@@ -1,0 +1,49 @@
+From 853d1f2bcfe21537d920d1c9b4cb5f5787bc9079 Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Fri, 2 Oct 2026 21:36:40 -0700
+Subject: [PATCH 25/50] fix: add MAC address nvmem binding for EnGenius AP-HK07
+ boards
+
+Read ethaddr from u-boot env partition (0:appsblenv) and bind it to
+the LAN port via nvmem-cells, matching the WAX218 pattern. Without
+this, the LAN interface gets a random MAC on each boot.
+
+The EnGenius u-boot stores ethaddr in the env partition; wiping it
+causes fallback to the default MAC 00:03:7f:12:3e:87.
+---
+ .../qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi  | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/target/linux/qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi b/target/linux/qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi
+index 916a184111..34d5ff4125 100644
+--- a/target/linux/qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi
++++ b/target/linux/qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi
+@@ -131,6 +131,8 @@
+ 			phy-handle = <&qca8081_28>;
+ 			phy-mode = "2500base-x";
+ 			pcs-handle = <&uniphy2 0>;
++			nvmem-cells = <&macaddr_ubootenv_ethaddr>;
++			nvmem-cell-names = "mac-address";
+ 		};
+ 	};
+ };
+@@ -154,6 +156,19 @@
+ 
+ 		partitions {
+ 			compatible = "qcom,smem-part";
++
++			partition-0-appsblenv {
++				label = "0:appsblenv";
++				read-only;
++
++				nvmem-layout {
++					compatible = "u-boot,env";
++					env-size = <0x40000>;
++
++					macaddr_ubootenv_ethaddr: ethaddr {
++					};
++				};
++			};
+ 		};
+ 	};
+ };

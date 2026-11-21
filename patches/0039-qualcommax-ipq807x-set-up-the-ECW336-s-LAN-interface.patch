@@ -1,0 +1,27 @@
+From b15bce89e9706a1e6956b8fd90b56492dde21e93 Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 18:14:08 -0800
+Subject: [PATCH 39/50] qualcommax: ipq807x: set up the ECW336's LAN interface
+
+Without an entry the ECW336 fell through to the default, which bridged the
+DSA master (eth0) instead of the 'lan' user port and assigned a static
+192.168.1.1: br-lan came up with brif/eth0 only, 'lan' stayed down with no
+carrier, and nothing passed traffic even after the NSS data plane was gone.
+
+Same handling as its three siblings: ucidef_set_interface_lan "lan" "dhcp".
+---
+ .../linux/qualcommax/ipq807x/base-files/etc/board.d/02_network   | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network b/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
+index dd46f9dafb..f6fcf16a69 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
++++ b/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
+@@ -61,6 +61,7 @@ ipq807x_setup_interfaces()
+ 		ucidef_set_interfaces_lan_wan "lan2 lan3 lan4 lan5" "wan"
+ 		;;
+ 	engenius,ecw230v3|\
++	engenius,ecw336|\
+ 	engenius,ews377ap-v3|\
+ 	engenius,ews377-fit|\
+ 	netgear,wax218|\

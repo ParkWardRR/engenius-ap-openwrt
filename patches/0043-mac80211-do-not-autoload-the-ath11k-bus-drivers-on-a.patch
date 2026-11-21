@@ -1,0 +1,63 @@
+From 7f05f491ebfd880ac9883f65baf4783d4db26f0b Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 20:07:30 -0800
+Subject: [PATCH 43/50] mac80211: do not autoload the ath11k bus drivers on an
+ NSS build
+
+nss.init owns Wi-Fi bring-up on this tree: it arms the wired plane,
+boots the NSS firmware, writes nss_offload and only then loads
+ath11k_ahb/ath11k_pci, so each radio binds exactly once and already on
+the right data path ("ath11k has no module autoload in this tree", per
+its own header). An AUTOLOAD on the bus drivers defeats that - kmodloader
+runs from /etc/init.d/boot (START=10), well before nss.init (START=19),
+so the radios bind in host mode and the offload flip arrives after the
+fact. kmod-ath11k itself still autoloads under ATH11K_NSS_SUPPORT: it
+carries frame_mode=2 and binds nothing on its own.
+
+Keep the unconditional autoload for non-NSS builds, where nothing else
+would load them and the PCIe radio (QCN9074 6 GHz on the EnGenius
+ECW336) would simply never come up.
+
+Verified on ECW336 hardware: NSS firmware NSS.FW.12.5-210-HK.R boots,
+port 5 arms onto the fw data plane (vsi 1), all three radios register
+with wifili offload (nss if_num 203 and 215), nss-status reports
+OFFLOAD ACTIVE with a clean kernel log.
+---
+ package/kernel/mac80211/ath.mk | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/package/kernel/mac80211/ath.mk b/package/kernel/mac80211/ath.mk
+index fbb4173013..ecc68659f2 100644
+--- a/package/kernel/mac80211/ath.mk
++++ b/package/kernel/mac80211/ath.mk
+@@ -471,7 +471,16 @@ define KernelPackage/ath11k-ahb
+   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath11k
+   DEPENDS+= @TARGET_qualcommax +kmod-ath11k +kmod-qrtr-smd
+   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko
++# The bus drivers are what make a radio bind, so on an NSS build they must not
++# autoload: nss.init arms the wired plane, boots the NSS firmware and writes
++# nss_offload *before* loading ath11k_ahb/ath11k_pci, so each radio binds once,
++# already on the right data path. kmodloader runs from /etc/init.d/boot
++# (START=10), well before nss.init (START=19), so an AUTOLOAD here races the
++# offload flip instead of waiting for it. kmod-ath11k itself still autoloads on
++# NSS builds - it carries frame_mode=2 and binds nothing on its own.
++ifndef CONFIG_ATH11K_NSS_SUPPORT
+   AUTOLOAD:=$(call AutoProbe,ath11k_ahb)
++endif
+ endef
+ 
+ define KernelPackage/ath11k-ahb/description
+@@ -485,7 +494,13 @@ define KernelPackage/ath11k-pci
+   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath11k
+   DEPENDS+= @PCI_SUPPORT +kmod-qrtr-mhi +kmod-ath11k
+   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_pci.ko
++# See KernelPackage/ath11k-ahb: on an NSS build nss.init loads this one, after
++# the offload flip. Without NSS nothing else would, and the PCIe radio (QCN9074
++# 6 GHz on the ECW336) would simply never come up - upstream OpenWrt autoloads
++# it unconditionally.
++ifndef CONFIG_ATH11K_NSS_SUPPORT
+   AUTOLOAD:=$(call AutoProbe,ath11k_pci)
++endif
+ endef
+ 
+ define KernelPackage/ath11k-pci/description

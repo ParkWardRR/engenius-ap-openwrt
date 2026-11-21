@@ -1,0 +1,35 @@
+From 79d49774d585f2958040b7aa9918b136796ada82 Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 16:55:02 -0800
+Subject: [PATCH 36/50] nss-tools: drop the stale kmod-qca-mcs dependency
+
+The nss-packages edma-nss feed no longer ships a qca-mcs package -- it moved
+ECM off it, as its own
+qca-nss-ecm/patches/0049-ecm_interface-track-the-bridge-MDB-without-qca-mcs.patch
+says. With the dependency still declared, package/install fails outright:
+
+  ERROR: unable to select packages:
+    kmod-qca-mcs (no such package):
+      required by: nss-tools-1[kmod-qca-mcs]
+
+nss-up already treats the module as optional ('modprobe qca-mcs 2>/dev/null
+|| true', with a comment explaining the bridge IGMP snoop -> switchdev MDB ->
+qca_ppe path works without it) and nss-status merely reports whether it is
+loaded, so nothing else needs changing.
+---
+ package/nss/nss-tools/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/package/nss/nss-tools/Makefile b/package/nss/nss-tools/Makefile
+index 2137a30c7a..16f0821355 100644
+--- a/package/nss/nss-tools/Makefile
++++ b/package/nss/nss-tools/Makefile
+@@ -16,7 +16,7 @@ define Package/nss-tools
+   TITLE:=NSS offload runtime tools (nss-up, nss-status)
+   DEPENDS:=@(TARGET_qualcommax) +kmod-qca-ppe-nss +kmod-qca-nss-drv \
+ 	+kmod-qca-nss-ecm +kmod-qca-nss-drv-pppoe +kmod-qca-nss-drv-bridge-mgr \
+-	+kmod-qca-mcs +kmod-qca-nss-drv-qdisc +kmod-qca-nss-drv-igs \
++	+kmod-qca-nss-drv-qdisc +kmod-qca-nss-drv-igs \
+ 	+sqm-scripts-nss +ethtool +ip-bridge
+   PKGARCH:=all
+ endef

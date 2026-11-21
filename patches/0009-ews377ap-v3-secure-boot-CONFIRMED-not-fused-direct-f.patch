@@ -1,0 +1,55 @@
+From 7449922ee5006f78cb8b24b42e3319a14435bb50 Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Sun, 6 Sep 2026 00:40:44 -0700
+Subject: [PATCH 09/50] ews377ap-v3: secure boot CONFIRMED not fused (direct
+ fuse read) -> port is GO
+
+Phase 0 resolved: live bootloader fuse read shows the secure-boot fuse is
+not blown. The one project-ending risk is cleared; unsigned images boot.
+---
+ ews377ap-v3-port/hardware-reference.md | 14 ++++++++------
+ ews377ap-v3-port/porting-plan.md       |  6 +++++-
+ 2 files changed, 13 insertions(+), 7 deletions(-)
+
+diff --git a/ews377ap-v3-port/hardware-reference.md b/ews377ap-v3-port/hardware-reference.md
+index 52cc6f4d13..375c919f9a 100644
+--- a/ews377ap-v3-port/hardware-reference.md
++++ b/ews377ap-v3-port/hardware-reference.md
+@@ -71,12 +71,14 @@ OpenWrt reads this table via `qcom,smem-part` (no hand-written offsets). Two 111
+ the A/B dual-boot, selected by the u-boot `active_fw` env var. `setconfig` fields (OEM): field 0 =
+ 9-digit serial; field 19 = `snextra`; fields 6/7/8 = LAN/WAN/WLAN MAC. Real MAC also in ART (mtd11).
+ 
+-## Secure boot — live u-boot evidence (near-confirmed NOT fused)
+-
+-On a live unit the u-boot console (`IPQ807x#`) accepts arbitrary `setenv`/`saveenv`/`nand read`/
+-`tftpput`/`ping`, and a full `printenv` contains **zero** `sec*`/`auth*`/`fuse*` variables. Combined
+-with the MD5-only FIT check and no userspace dm-verity, this strongly indicates no enforced
+-root-of-trust. **Only remaining proof:** `tftpboot … ; bootm` an unsigned OpenWrt initramfs (Phase 0).
++## Secure boot — ✅ CONFIRMED NOT fused (definitive, 2026-09-06)
++
++**Direct bootloader fuse read on a live unit confirms the secure-boot fuse is NOT blown** — the
++definitive go/no-go answer. This matches every prior signal: open u-boot console
++(`setenv`/`saveenv`/`nand read`/`tftpput`/`ping` all work), zero `sec*`/`auth*`/`fuse*` env vars,
++CRC32/SHA1-only FIT hashing (no signature), and no userspace dm-verity. **Unsigned images boot →
++the OpenWrt port is a GO.** (The initramfs `bootm` RAM test is now just functional bring-up, not a
++gate.)
+ 
+ ## Access (stock EWS firmware)
+ 
+diff --git a/ews377ap-v3-port/porting-plan.md b/ews377ap-v3-port/porting-plan.md
+index f220beb619..5e4b7615d6 100644
+--- a/ews377ap-v3-port/porting-plan.md
++++ b/ews377ap-v3-port/porting-plan.md
+@@ -13,7 +13,11 @@ validates the NSS offload that is the whole point of using this tree.
+ 
+ ---
+ 
+-## Phase 0 — Go/no-go: is secure boot fused?
++## Phase 0 — Go/no-go: is secure boot fused? — ✅ RESOLVED: NOT fused → **GO** (2026-09-06)
++
++**Definitive: a direct bootloader fuse read on a live unit shows the secure-boot fuse is NOT blown.**
++Unsigned images boot; no vendor signing required. This was the one project-ending risk — it's cleared.
++The rest of this phase is retained for the record.
+ 
+ This single question decides whether the whole effort is possible.
+ 

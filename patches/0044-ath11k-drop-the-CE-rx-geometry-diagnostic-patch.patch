@@ -1,0 +1,61 @@
+From 836b9f428fd4efdb919659bf7740bcae6d98fe2a Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 20:22:27 -0800
+Subject: [PATCH 44/50] ath11k: drop the CE rx geometry diagnostic patch
+
+It was added to attribute a ~4 GiB DMA map length on the first CE rx
+post. The cause turned out to be unrelated to ath11k: stale out-of-tree
+modules built against a kernel config with a different struct sk_buff
+layout, so skb->len and skb_tailroom() were read out of the wrong words.
+With the kernel and the modules built together the geometry is correct
+and the warning never fires. Keep 999-941 (unconditional nss members),
+which is still needed to build with ATH11K_NSS_SUPPORT off.
+---
+ ...rt-skb-geometry-on-ce-rx-map-failure.patch | 38 -------------------
+ 1 file changed, 38 deletions(-)
+ delete mode 100644 package/kernel/mac80211/patches/nss/ath11k/999-940-ath11k-report-skb-geometry-on-ce-rx-map-failure.patch
+
+diff --git a/package/kernel/mac80211/patches/nss/ath11k/999-940-ath11k-report-skb-geometry-on-ce-rx-map-failure.patch b/package/kernel/mac80211/patches/nss/ath11k/999-940-ath11k-report-skb-geometry-on-ce-rx-map-failure.patch
+deleted file mode 100644
+index a1fdb56e40..0000000000
+--- a/package/kernel/mac80211/patches/nss/ath11k/999-940-ath11k-report-skb-geometry-on-ce-rx-map-failure.patch
++++ /dev/null
+@@ -1,38 +0,0 @@
+-From: Orsavio P. Delmare <orsavio@delmare.lu>
+-Subject: [PATCH] ath11k: report skb geometry when a CE rx buffer fails to map
+-
+-On the EnGenius ECW336 (IPQ8072A), an NSS-enabled build fails firmware
+-bring-up with a DMA map length of ~4 GiB on the first CE rx post:
+-
+-  ath11k c000000.wifi: swiotlb buffer is full (sz: 4294965184 bytes), total 512 (slots), used 0 (slots)
+-  ath11k c000000.wifi: failed to dma map ce rx buf
+-  ath11k c000000.wifi: failed to post rx buf to pipe: 1 err: -5
+-  ath11k c000000.wifi: failed to connect to HTC: -110
+-
+-4294965184 is -2112 reinterpreted as a size_t, and 2112 is exactly
+-2048 + NET_SKB_PAD, so skb_tailroom() is returning a large negative value for
+-an skb that dev_alloc_skb() has just handed back -- i.e. skb->tail is past
+-skb->end. The same geometry shows up as a fatal oops in the initramfs case.
+-
+-The warning as it stands says nothing about which pipe or what the skb looked
+-like, which makes the bug impossible to attribute from a console log. Print the
+-pipe, the configured buffer size and the skb's geometry so the next failure
+-says whether buf_sz, the allocation, or the skb itself is wrong.
+-
+-This is diagnostic only; drop it once the root cause is fixed.
+-
+---- a/drivers/net/wireless/ath/ath11k/ce.c
+-+++ b/drivers/net/wireless/ath/ath11k/ce.c
+-@@ -336,7 +336,11 @@ static int ath11k_ce_rx_post_pipe(struct ath11k_ce_pipe *pipe)
+- 				       skb->len + skb_tailroom(skb),
+- 				       DMA_FROM_DEVICE);
+- 		if (unlikely(dma_mapping_error(ab->dev, paddr))) {
+--			ath11k_warn(ab, "failed to dma map ce rx buf\n");
+-+			ath11k_warn(ab,
+-+				    "failed to dma map ce rx buf: pipe %u buf_sz %u skb len %u tailroom %d truesize %u tail %u end %u\n",
+-+				    pipe->pipe_num, pipe->buf_sz, skb->len,
+-+				    skb_tailroom(skb), skb->truesize,
+-+				    skb->tail, skb->end);
+- 			dev_kfree_skb_any(skb);
+- 			ret = -EIO;
+- 			goto exit;

@@ -1,0 +1,71 @@
+From 9a7168563b54d6a597d61c4e8d07b610de58accc Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Sun, 6 Sep 2026 11:14:25 -0700
+Subject: [PATCH 10/50] qualcommax: rename DTS to convention
+ ipq8072-ews377ap-v3.dts (fixes build)
+
+The image build derives the DTB name from the device name with the vendor
+prefix stripped (engenius_ews377ap-v3 -> ipq8072-ews377ap-v3.dts), matching
+in-tree devices (tplink_eap660hd-v1 -> ipq8072-eap660hd-v1.dts). The file
+was misnamed with the vendor included, causing target/linux/install to fail
+with 'No such file'. Content unchanged.
+---
+ PORT-STATUS-ews377ap-v3.md                                    | 2 +-
+ ews377ap-v3-port/README.md                                    | 2 +-
+ ews377ap-v3-port/porting-plan.md                              | 4 ++--
+ ...q8072-engenius-ews377ap-v3.dts => ipq8072-ews377ap-v3.dts} | 0
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+ rename target/linux/qualcommax/dts/{ipq8072-engenius-ews377ap-v3.dts => ipq8072-ews377ap-v3.dts} (100%)
+
+diff --git a/PORT-STATUS-ews377ap-v3.md b/PORT-STATUS-ews377ap-v3.md
+index 8d6cb20fe4..9a7773d83f 100644
+--- a/PORT-STATUS-ews377ap-v3.md
++++ b/PORT-STATUS-ews377ap-v3.md
+@@ -18,7 +18,7 @@ unit remain `TODO`.
+ 
+ | File | State |
+ |---|---|
+-| `target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts` | scaffold from EAP660HD; placeholders flagged |
++| `target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts` | scaffold from EAP660HD; placeholders flagged |
+ | `target/linux/qualcommax/image/ipq807x.mk` — `Device/engenius_ews377ap-v3` | FitImage + UbiFit sysupgrade; factory (senao-header) stubbed |
+ | `package/firmware/ipq-wifi/Makefile` — `ipq-wifi-engenius_ews377ap-v3` | package registered; **board-2.bin not yet supplied** |
+ 
+diff --git a/ews377ap-v3-port/README.md b/ews377ap-v3-port/README.md
+index 787f7ee62c..88a9564691 100644
+--- a/ews377ap-v3-port/README.md
++++ b/ews377ap-v3-port/README.md
+@@ -9,7 +9,7 @@ locations; this directory is the design/reference companion.
+ 
+ ## Port files in the tree
+ 
+-- `target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts` — device tree
++- `target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts` — device tree
+ - `target/linux/qualcommax/image/ipq807x.mk` — `Device/engenius_ews377ap-v3`
+ - `package/firmware/ipq-wifi/Makefile` — `ipq-wifi-engenius_ews377ap-v3`
+ 
+diff --git a/ews377ap-v3-port/porting-plan.md b/ews377ap-v3-port/porting-plan.md
+index 5e4b7615d6..1e56c512f0 100644
+--- a/ews377ap-v3-port/porting-plan.md
++++ b/ews377ap-v3-port/porting-plan.md
+@@ -92,7 +92,7 @@ Prove the SoC/DDR/console under OpenWrt **without writing flash**.
+ ## Phase 3 — Device tree for `ap-hk07`  — ✅ largely drafted (offline)
+ 
+ Done from the decompiled OEM `fdt@hk07` (see `reference/`); DTS lives at
+-`target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts` on the fork branch `ews377ap-v3`,
++`target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts` on the fork branch `ews377ap-v3`,
+ derived from `ipq8071-ap8220` (the closest in-tree 2.5G IPQ8072 AP).
+ 
+ - ✅ **Partitions:** SMEM-defined → `qcom,smem-part` auto-reads DEVCFG/APPSBLENV/APPSBL/cert/ART/rootfs.
+@@ -104,7 +104,7 @@ derived from `ipq8071-ap8220` (the closest in-tree 2.5G IPQ8072 AP).
+   driver** — not portable.
+ - **Pre-cal:** ath11k reads per-device caldata from **ART (mtd11)** — verify on hardware.
+ 
+-**Deliverable:** `ipq8072-engenius-ews377ap-v3.dts` — drafted; boots to be proven at Phase 2.
++**Deliverable:** `ipq8072-ews377ap-v3.dts` — drafted; boots to be proven at Phase 2.
+ 
+ ---
+ 
+diff --git a/target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts b/target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts
+similarity index 100%
+rename from target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts
+rename to target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts

@@ -1,0 +1,33 @@
+From 9089188fb29d64003c25f9116e9e58873654c211 Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Sun, 6 Sep 2026 14:41:38 -0700
+Subject: [PATCH 17/50] qualcommax: ews377ap-v3: use QSDK factory-nand image
+ format
+
+OEM QSDK u-boot bootipq loads the kernel via 'ubi read $addr kernel;
+bootm'. The bare Device/UbiFit append-ubi image gave a 0-byte kernel
+read on hardware (safe fallback to stock, verified 2026-09-06). Wrap
+the UBI in the QSDK factory-nand format like the sibling IPQ8072 QSDK
+devices (compex_wpq873, edgecore_eap102).
+---
+ target/linux/qualcommax/image/ipq807x.mk | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/target/linux/qualcommax/image/ipq807x.mk b/target/linux/qualcommax/image/ipq807x.mk
+index 265df64f3f..c6673954ee 100644
+--- a/target/linux/qualcommax/image/ipq807x.mk
++++ b/target/linux/qualcommax/image/ipq807x.mk
+@@ -210,6 +210,13 @@ define Device/engenius_ews377ap-v3
+ 	PAGESIZE := 2048
+ 	SOC := ipq8072
+ 	DEVICE_PACKAGES := ipq-wifi-engenius_ews377ap-v3
++	# This unit keeps the OEM QSDK u-boot, whose bootipq does
++	# `ubi read $addr kernel; bootm`. The bare Device/UbiFit `append-ubi`
++	# image is not loadable that way (0-byte kernel read -> safe fallback,
++	# confirmed on hardware 2026-09-06). Wrap the UBI in the QSDK factory
++	# format like the sibling IPQ8072 QSDK devices (compex_wpq873,
++	# edgecore_eap102) so the OEM bootloader can load it.
++	IMAGE/factory.ubi := append-ubi | qsdk-ipq-factory-nand
+ 	# TODO(install): add Senao-header factory image once flag mapping is
+ 	# verified, e.g.:
+ 	#   IMAGES += web-ui-factory.bin

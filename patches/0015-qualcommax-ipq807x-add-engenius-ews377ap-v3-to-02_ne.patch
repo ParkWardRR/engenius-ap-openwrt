@@ -1,0 +1,31 @@
+From 79cf1d2d312e84f5e0b9c46f3b89c192a5716cdd Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Sun, 6 Sep 2026 13:06:32 -0700
+Subject: [PATCH 15/50] qualcommax: ipq807x: add engenius,ews377ap-v3 to
+ 02_network (single 2.5G lan)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+WiFi confirmed fully working on hardware (both radios AP+STA, 23dBm) — the
+'hang' was a false negative (radios register as phy2/phy3; only iw dev was
+empty). The remaining gap was board.d: our board hit the *) default
+('Unsupported hardware'), so network/board.json weren't set up and wifi
+auto-config was blocked. Add it to the single-lan AP group (like wax218/
+eap660hd). WiFi generates correctly via wifi config once radios are up.
+---
+ .../linux/qualcommax/ipq807x/base-files/etc/board.d/02_network   | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network b/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
+index de072424fe..ec9899a081 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
++++ b/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
+@@ -60,6 +60,7 @@ ipq807x_setup_interfaces()
+ 	netgear,sxs80)
+ 		ucidef_set_interfaces_lan_wan "lan2 lan3 lan4 lan5" "wan"
+ 		;;
++	engenius,ews377ap-v3|\
+ 	netgear,wax218|\
+ 	netgear,wax620)
+ 		ucidef_set_interface_lan "lan" "dhcp"

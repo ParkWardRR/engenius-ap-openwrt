@@ -1,0 +1,26 @@
+From e2c60df89d2eee9fe4abb5b436558d1f1dd8ef99 Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 16:08:36 -0800
+Subject: [PATCH 34/50] qualcommax: ipq807x: handle sysupgrade on the EnGenius
+ ECW336
+
+The ECW336 was missing from the nand_do_upgrade case list, so a sysupgrade
+from a running OpenWrt would have fallen through to the default and been
+refused. Same handling as its three siblings: plain nand_do_upgrade, which
+resolves CI_UBIPART to the SMEM-labelled 'rootfs' partition (slot 0).
+---
+ .../linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh  | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh b/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
+index f249944e42..dc95845172 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
++++ b/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
+@@ -180,6 +180,7 @@ platform_do_upgrade() {
+ 	dynalink,dl-wrx36|\
+ 	edimax,cax1800|\
+ 	engenius,ecw230v3|\
++	engenius,ecw336|\
+ 	engenius,ews377ap-v3|\
+ 	engenius,ews377-fit|\
+ 	netgear,rax120v2|\

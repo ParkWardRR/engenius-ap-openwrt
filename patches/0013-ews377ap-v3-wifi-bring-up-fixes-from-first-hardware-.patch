@@ -1,0 +1,65 @@
+From abfb362958456799e07617cb6526263469f0df0a Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Sun, 6 Sep 2026 11:50:40 -0700
+Subject: [PATCH 13/50] ews377ap-v3: wifi bring-up fixes from first hardware
+ boot
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Real-hardware RAM boot showed ath11k requests qmi-board-id=255 (0xff, the
+unfused id disambiguated by variant), path ath11k/IPQ8074/hw2.0/, then wanted
+per-device cal-ahb-c000000.wifi.bin. Fixes:
+1. ipq-wifi: add Build/Prepare to merge local files/ into PKG_BUILD_DIR — the
+   git PKG_SOURCE unpack was clobbering it, so our board-2.bin never shipped.
+2. board-2.bin: rekey to qmi-board-id=255,variant=EnGenius-EWS377AP-v3 (was 656).
+3. ipq807x caldata hotplug: add engenius,ews377ap-v3 -> caldata_extract 0:art
+   0x1000 0x20000 (per-device cal from ART/mtd11), matching ipq8071-ap8220.
+---
+ package/firmware/ipq-wifi/Makefile            |  10 ++++++++++
+ .../files/board-engenius_ews377ap-v3.ipq8074  | Bin 131232 -> 131184 bytes
+ .../etc/hotplug.d/firmware/11-ath11k-caldata  |   1 +
+ 3 files changed, 11 insertions(+)
+
+diff --git a/package/firmware/ipq-wifi/Makefile b/package/firmware/ipq-wifi/Makefile
+index 0c90726bc3..d44c6778bc 100644
+--- a/package/firmware/ipq-wifi/Makefile
++++ b/package/firmware/ipq-wifi/Makefile
+@@ -13,6 +13,16 @@ PKG_FLAGS:=nonshared
+ 
+ include $(INCLUDE_DIR)/package.mk
+ 
++# This package pulls upstream board files from a git PKG_SOURCE, whose unpack
++# populates PKG_BUILD_DIR. Local override files under ./files/ (used by
++# install-overlay's $(PKG_BUILD_DIR)/board-<dev>.* wildcard) must be copied in
++# AFTER the default prepare, or they never ship. Without this, a board-<dev>.*
++# placed in files/ is silently ignored.
++define Build/Prepare
++	$(call Build/Prepare/Default)
++	$(if $(wildcard ./files/*),$(CP) ./files/. $(PKG_BUILD_DIR)/)
++endef
++
+ define Build/Compile
+ endef
+ 
+diff --git a/package/firmware/ipq-wifi/files/board-engenius_ews377ap-v3.ipq8074 b/package/firmware/ipq-wifi/files/board-engenius_ews377ap-v3.ipq8074
+index 677f3f872cfcf5acf30f1da30ec4fcb10bd69b43..3af980c84ac63d6d17fa45cd548a7d62396fcf92 100644
+GIT binary patch
+delta 34
+ncmZ3`$nl|pV}b-{2m=!X2slqvRAV+WHEpbFtzw*7#iRxRnzjg)
+
+delta 43
+vcmey+z_Fl_V}b-{3j-4a2&hd|RAV(WHOtMND5K2`WHfrUdNEG*Vp0PD@Ae9H
+
+diff --git a/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata b/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+index a5bcdf3b66..a836fbd691 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
++++ b/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+@@ -26,6 +26,7 @@ case "$FIRMWARE" in
+ 	compex,wpq873|\
+ 	edgecore,eap102|\
+ 	edimax,cax1800|\
++	engenius,ews377ap-v3|\
+ 	linksys,mx5300|\
+ 	netgear,wax218|\
+ 	redmi,ax6|\

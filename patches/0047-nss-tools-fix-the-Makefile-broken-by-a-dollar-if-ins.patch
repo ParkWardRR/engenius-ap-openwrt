@@ -1,0 +1,48 @@
+From a9bda4c21c66e02b76e642d10251e458a1ad4bcc Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 23:39:40 -0800
+Subject: [PATCH 47/50] nss-tools: fix the Makefile broken by a dollar-if
+ inside a comment
+
+The previous commit's explanatory comment contained the literal text
+$(if $(filter HK,$(NSS_SOC))). make expands variable references in
+recipe lines even when the line starts with '#', so that prose was
+parsed as a real function call and the package died at every phase with
+
+  Makefile:89: *** insufficient number of arguments (1) to function 'if'
+
+Reword the comment without a function reference, say so explicitly so
+nobody re-adds it, and express the condition as an ifeq around the
+recipe line - which is also the idiomatic form used elsewhere in the
+tree - instead of a $(if ...) spanning a line continuation.
+---
+ package/nss/nss-tools/Makefile | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/package/nss/nss-tools/Makefile b/package/nss/nss-tools/Makefile
+index 8940bb0dd1..86cd78b7d1 100644
+--- a/package/nss/nss-tools/Makefile
++++ b/package/nss/nss-tools/Makefile
+@@ -104,12 +104,18 @@ define Package/nss-tools/install
+ 	# lines was selected, so this stays correct across that choice.
+ 	#
+ 	# Core 1 exists only on Hawkeye: nss-firmware installs qca-nss1-retail.bin
+-	# under $(if $(filter HK,$(NSS_SOC))), so symlinking it unconditionally
+-	# would dangle on ipq60xx - one NSS core, second image never requested.
++	# only when NSS_SOC is HK, so symlinking it unconditionally would dangle on
++	# ipq60xx - one NSS core there, and the second image is never requested.
++	#
++	# Do not write that condition as a dollar-if in a comment: make expands
++	# variable references in recipe lines even when the line starts with '#',
++	# so prose containing one is parsed as a real function call and the package
++	# dies with "insufficient number of arguments (1) to function 'if'".
+ 	$(INSTALL_DIR) $(1)/lib/firmware
+ 	$(LN) qca-nss0-retail.bin $(1)/lib/firmware/qca-nss0.bin
+-	$(if $(CONFIG_TARGET_qualcommax_ipq807x),$(LN) qca-nss1-retail.bin \
+-		$(1)/lib/firmware/qca-nss1.bin)
++ifeq ($(CONFIG_TARGET_qualcommax_ipq807x),y)
++	$(LN) qca-nss1-retail.bin $(1)/lib/firmware/qca-nss1.bin
++endif
+ 	$(INSTALL_DIR) $(1)/usr/sbin
+ 	$(INSTALL_BIN) ./files/nss-up $(1)/usr/sbin/nss-up
+ 	$(INSTALL_BIN) ./files/nss-status $(1)/usr/sbin/nss-status

@@ -1,0 +1,1415 @@
+From 8ceb4ae66e2d81344000fae376ac645d29180fc0 Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Fri, 2 Oct 2026 18:46:17 -0700
+Subject: [PATCH 24/50] feat: add ECW230v3 + EWS377-FIT board support, fix
+ EWS377AP v3 bugs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add candidate board support for two EnGenius sibling SKUs that share
+identical AP-HK07 hardware (IPQ8072A) with the validated EWS377AP v3:
+- EnGenius ECW230v3 (cloud-managed AP, product_id 0x011c)
+- EnGenius EWS377-FIT (FIT-controller AP, product_id 0x012c)
+
+No hardware access to these boards — candidate support for community
+testing. WiFi board data extracted from stock firmware.
+
+Factor EWS377AP v3 DTS into shared ipq8072-engenius-ap-hk07.dtsi with
+thin per-device .dts wrappers (upstream sibling-SKU playbook pattern).
+
+Fix two EWS377AP v3 bugs:
+- Add missing ubi.block=0,rootfs bootarg for UBI block device creation
+- Add all three EnGenius boards to platform.sh nand_do_upgrade case
+
+Refactor ipq807x.mk to use shared Device/engenius_ap-hk07 base with
+IB/INITRAMFS-gated web-ui-factory.fit (matching WAX218 pattern).
+---
+ README.md                                     |  19 +
+ .../sibling-sku-firmware-analysis.md          | 328 ++++++++++++++++++
+ package/firmware/ipq-wifi/Makefile            |   7 +-
+ .../files/board-engenius_ecw230v3.ipq8074     | Bin 0 -> 131180 bytes
+ .../files/board-engenius_ews377-fit.ipq8074   | Bin 0 -> 131184 bytes
+ .../dts/ipq8072-engenius-ap-hk07.dtsi         | 164 +++++++++
+ .../dts/ipq8072-engenius-ecw230v3.dts         |  21 ++
+ .../dts/ipq8072-engenius-ews377-fit.dts       |  18 +
+ .../qualcommax/dts/ipq8072-ews377ap-v3.dts    | 218 +-----------
+ target/linux/qualcommax/image/ipq807x.mk      |  61 ++--
+ .../ipq807x/base-files/etc/board.d/02_network |   2 +
+ .../etc/hotplug.d/firmware/11-ath11k-caldata  |   2 +
+ .../base-files/lib/upgrade/platform.sh        |   3 +
+ 13 files changed, 590 insertions(+), 253 deletions(-)
+ create mode 100644 ews377ap-v3-port/sibling-sku-firmware-analysis.md
+ create mode 100644 package/firmware/ipq-wifi/files/board-engenius_ecw230v3.ipq8074
+ create mode 100644 package/firmware/ipq-wifi/files/board-engenius_ews377-fit.ipq8074
+ create mode 100644 target/linux/qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi
+ create mode 100644 target/linux/qualcommax/dts/ipq8072-engenius-ecw230v3.dts
+ create mode 100644 target/linux/qualcommax/dts/ipq8072-engenius-ews377-fit.dts
+
+diff --git a/README.md b/README.md
+index ff1075a2b9..c08e6a06f4 100644
+--- a/README.md
++++ b/README.md
+@@ -22,6 +22,25 @@ NSS node in its device tree, are on the
+ page. IPQ60xx images are in the `ipq60xx-1g` and `ipq60xx-512m` groups.
+ Each build comes in a default and a mesh flavour.
+ 
++## EnGenius AP-HK07 board support
++
++Three EnGenius SKUs share the AP-HK07 reference design (IPQ8072A, QCN5024 +
++QCN5054, 2.5GbE QCA8081 uplink):
++
++| SKU | Status | Install |
++|---|---|---|
++| **EWS377AP v3** (managed AP) | Validated on hardware | sysupgrade + web-ui-factory.fit |
++| **ECW230v3** (cloud AP) | Candidate — needs community testing | sysupgrade + web-ui-factory.fit |
++| **EWS377-FIT** (FIT-controller AP) | Candidate — needs community testing | sysupgrade + web-ui-factory.fit |
++
++The three share a common device-tree include (`ipq8072-engenius-ap-hk07.dtsi`)
++with thin per-device `.dts` wrappers that set the compatible string and WiFi
++calibration variant. Board-specific WiFi calibration data (`board-2.bin`) is
++extracted from each SKU's stock firmware.
++
++See `ews377ap-v3-port/sibling-sku-firmware-analysis.md` for the firmware
++analysis that confirmed hardware identity across the three SKUs.
++
+ ## Documentation
+ 
+ The [wiki](https://github.com/JuliusBairaktaris/openwrt-nss-edma/wiki)
+diff --git a/ews377ap-v3-port/sibling-sku-firmware-analysis.md b/ews377ap-v3-port/sibling-sku-firmware-analysis.md
+new file mode 100644
+index 0000000000..f655a9ca6b
+--- /dev/null
++++ b/ews377ap-v3-port/sibling-sku-firmware-analysis.md
+@@ -0,0 +1,328 @@
++# Sibling SKU firmware analysis — ECW230v3 + EWS377-FIT
++
++Date: 2026-10-02
++Firmware analyzed:
++- `EWS377APv3-v3.9.3.2_c1.9.51.bin` (from `EWS377APv3-v3.9.3(2).zip`)
++- `Cloud6_4x4_ECW230v3_firmware_v1.8.114-1(2).bin`
++- `ews377-fit-1.0.50-2(2).bin`
++
++## Senao firmware header format
++
++All three use the same XOR-encrypted Senao firmware format:
++
++| Field | Offset | EWS377APv3 | ECW230v3 | EWS377-FIT |
++|---|---|---|---|---|
++| Product ID | 0x08 | 0x011a (282) | 0x011c (284) | 0x012c (300) |
++| Version string | 0x0C | 3.9.3.2 | 1.8.114-1 | 1.0.50-2 |
++| Payload size | 0x20 | 28,185,216 | 44,307,728 | 32,773,940 |
++| Model string | 0x80 | EWS377APv3 | ECW230v3 | EWS377-FIT |
++| Header size | — | 146 bytes | 144 bytes | 146 bytes |
++| XOR key | — | `783c9ecf67b359ac` | same | same |
++| Magic after decrypt | — | `d00dfeed` (FIT) | same | same |
++
++Decryption: XOR the payload (file minus header) byte-by-byte with the
++8-byte repeating key `783c9ecf67b359ac`. All three decrypt to valid FIT
++images (flattened device tree, magic `0xd00dfeed`).
++
++## FIT image structure
++
++Each decrypted payload is a QSDK-style "flash FIT" containing a u-boot
++script + UBI root image + WiFi firmware UBI:
++
++| Sub-image | EWS377APv3 | ECW230v3 | EWS377-FIT |
++|---|---|---|---|
++| script (flash.scr) | 1,997 B | 3,627 B | 3,003 B |
++| UBI root | 25,559,040 B | 41,549,824 B | 27,787,264 B |
++| WiFi FW v2 (UBI) | 2,621,440 B | 2,752,512 B | 2,621,440 B |
++| WiFi FW v1 (UBI) | — | — | 2,359,296 B |
++
++The UBI root image name hash differs between EWS377 variants
++(`dcf446f473bd...`) and ECW230v3 (`841371bb56a8...`).
++
++## NAND partition layout (from flash scripts)
++
++All three write to the same NAND offsets:
++
++| Partition | Offset | Size | Content |
++|---|---|---|---|
++| rootfs (slot 0) | 0x01000000 | 0x06f00000 (112 MB) | UBI root image |
++| wififw | 0x07f00000 | 0x00900000 (9 MB) | WiFi firmware (SquashFS in UBI) |
++
++ECW230v3's flash script additionally validates `soc_hw_version` (must be
++`200d0100`/`200d0101`/`200d0102`/`200d0200`) and `machid` before flashing.
++EWS377APv3/FIT scripts do not perform these checks.
++
++## Kernel FIT images (inside UBI root)
++
++Each UBI root contains a kernel FIT with multiple board DTBs:
++
++| Property | EWS377APv3 | ECW230v3 | EWS377-FIT |
++|---|---|---|---|
++| Kernel version | 4.4.60 | 5.4.213 | 4.4.60 |
++| **Default config** | `config@hk07` | `config@hk08` | `config@hk07` |
++| Has `fdt@hk07` | yes | yes | yes |
++| Total FDT count | 21 | 25 | 21 |
++
++**ECW230v3 defaults to `config@hk08`**, not `config@hk07`. This is the
++only device that differs. It does include an `fdt@hk07` DTB as well.
++This needs hardware verification to determine which config the ECW230v3
++u-boot actually selects at boot.
++
++## Device tree comparison (fdt@hk07)
++
++### Compatible strings
++
++| Firmware | compatible | model |
++|---|---|---|
++| EWS377APv3 | `qcom,ipq807x-hk07`, `qcom,ipq807x` | IPQ807x/AP-HK07 |
++| ECW230v3 | `qcom,ipq8074-ap-hk07`, `qcom,ipq8074` | IPQ8074/AP-HK07 |
++| EWS377-FIT | `qcom,ipq807x-hk07`, `qcom,ipq807x` | IPQ807x/AP-HK07 |
++
++ECW230v3 uses the newer compatible string format (`ipq8074` vs `ipq807x`),
++reflecting its newer QSDK base (kernel 5.4 vs 4.4).
++
++### Hardware — identical across all three
++
++| Component | Value | Verified in all 3 DTBs |
++|---|---|---|
++| SoC | IPQ8072A | yes |
++| LED R | GPIO54, active-high | yes |
++| LED G | GPIO55, active-high | yes |
++| LED B | GPIO56, active-high | yes |
++| HW LED controller | GPIO18/19/20 (qca,ledc) | yes |
++| Reset button | GPIO52, active-low | yes |
++| MDIO pins | GPIO68 (MDC), GPIO69 (MDIO) | yes |
++| Ethernet PHY | QCA8081 @ MDIO addr 28, port 6 | yes |
++| PHY reset | GPIO43 active-high, GPIO44 active-low | yes |
++| NAND | 128k block, 2048 page, 4-bit ECC | yes |
++
++### Differences between EWS377APv3 and EWS377-FIT DTBs
++
++Only 16 non-trivial differences, all firmware configuration:
++- `MP_512` flag present in FIT (reduced memory mode)
++- WiFi `tgt-mem-mode = <1>` in FIT vs `<0>` in APv3
++- LED default trigger: `timer` (FIT) vs `pwr_led` (APv3)
++- Smaller trust zone / WiFi memory reservations in FIT
++- No `qseecom` node in FIT
++- No `rmnet_rx-enabled` in FIT
++
++**Hardware is identical.** Same DTS can serve both.
++
++### Differences between EWS377APv3 and ECW230v3 DTBs
++
++The ECW230v3 fdt@hk07 uses a newer QSDK DTS structure (kernel 5.4
++bindings vs 4.4), so the node layout differs significantly in naming
++and organization. However, the **hardware-specific properties are
++identical**: same GPIOs, same PHY, same port layout, same flash config.
++
++## WiFi board data (bdwlan.b290) comparison
++
++All three contain `bdwlan.b290` files (board_id 0x290 = 656) extracted
++from WiFi firmware SquashFS within the WiFi FW UBI partition.
++
++| Source | SHA256 | Size |
++|---|---|---|
++| EWS377APv3 | `2877f953dcc74bc1c1068c7a0a4f66d24c84d5b7a59479aeb71c17243352069e` | 131,072 |
++| ECW230v3 | `61f98b41e53e9cc9c72846c70350533f20514a3016fe75c68b3a0a83cec0b385` | 131,072 |
++| EWS377-FIT | `8be0af19e24558d31cc6fb27dc950e55cdf25c1807b4f54d2b71f96d43fd62c1` | 131,072 |
++| Repo (wrapped) | `57c37327c85b0d6f53edb5eaf469723626dd78988b3736e49750ca1e7142d991` | 131,184 |
++
++Byte-level comparison:
++- **EWS377APv3 vs EWS377-FIT: 56 bytes differ** (0.04%) — likely
++  unit-specific checksums/version fields at offsets 0x0A-0x0B and 0x38
++- **ECW230v3 vs EWS377APv3: 6,495 bytes differ** (4.95%) — materially
++  different calibration data
++- **ECW230v3 vs EWS377-FIT: 6,490 bytes differ** (4.95%)
++
++### Conclusions on board data
++
++1. **EWS377-FIT can likely reuse the EWS377AP v3 board data** — only 56
++   bytes differ, all in header/checksum fields, not calibration regions.
++   Needs radio test confirmation.
++2. **ECW230v3 requires its own board data file** — ~5% of the file
++   differs, indicating different RF calibration (possibly different
++   antenna tuning, FEM configuration, or regulatory table).
++3. **The repo's board data file** (`board-engenius_ews377ap-v3.ipq8074`)
++   is a `board-2.bin` container (112-byte header + 131,072 raw data).
++   The wrapped data doesn't byte-match any of the three firmware
++   extractions, suggesting it came from a different firmware version or
++   unit-specific ART partition dump.
++
++### Board data file format
++
++The repo's board-2.bin container uses this header:
++```
++QCA-ATH11K-BOARD
++bus=ahb,qmi-chip-id=0,qmi-board-id=255,variant=EnGenius-EWS377AP-v3
++[131,072 bytes of raw board data]
++```
++
++For ECW230v3, a new file would need `variant=EnGenius-ECW230v3` (or
++similar) and distinct raw board data extracted from the ECW230v3 firmware.
++
++## ECW230v3 system identity (from rootfs)
++
++| Field | Value |
++|---|---|
++| `/etc/modelname` | `ecw230v3` |
++| `/etc/config/system` hostname | `ECW230` |
++| `board.cfg` CPU | `IPQ8072` |
++| `board.cfg` RF | `QCN5024_QCN5054` |
++| `board.cfg` ETH | `QCA8081` |
++| OpenWrt base | 19.07-SNAPSHOT (QSDK fork) |
++| NSS firmware | `qca-nss0-retail.bin` + `qca-nss1-retail.bin` present |
++| LED names (uci) | pwr_led, lan_led, wlan_2g_led, wlan_5g_led |
++
++The LED sysfs names (`pwr_led`, `lan_led`, `wlan_2g_led`, `wlan_5g_led`)
++map to the `qca,ledc` hardware LED controller (GPIO18/19/20), not the
++direct GPIO LEDs. OpenWrt mainline has no `qca,ledc` driver, so the
++direct GPIO RGB LED approach used in the EWS377 DTS is correct.
++
++## What's needed to add ECW230v3 and EWS377-FIT board support
++
++### Approach: shared .dtsi + thin per-device .dts files
++
++Per the upstream playbook (step 7), use a common dtsi:
++
++```
++target/linux/qualcommax/dts/
++├── ipq8072-engenius-ap-hk07.dtsi      # shared hardware: SoC, RAM, NAND, eth, wifi, GPIOs
++├── ipq8072-engenius-ews377ap-v3.dts   # EWS377AP v3 identity + overrides
++├── ipq8072-engenius-ecw230v3.dts      # ECW230v3 identity + overrides
++└── ipq8072-engenius-ews377-fit.dts    # EWS377-FIT identity + overrides
++```
++
++### Per-file changes needed
++
++#### 1. Device tree files
++
++**New `ipq8072-engenius-ap-hk07.dtsi`** — factor out the shared hardware
++from the current `ipq8072-ews377ap-v3.dts`:
++- SoC includes (ipq8074.dtsi, ipq8074-nss.dtsi, etc.)
++- UART, chosen, aliases
++- GPIO keys (reset @ GPIO52)
++- GPIO LEDs (RGB on GPIO54/55/56)
++- MDIO bus (GPIO68/69)
++- QCA8081 PHY @ addr 28
++- ESS switch + port@6 ethernet
++- NAND flash config
++- WiFi nodes with ath11k config
++
++**Thin `.dts` files** — each includes the dtsi and sets:
++- `compatible = "engenius,ews377ap-v3", "qcom,ipq8074"` (etc.)
++- `model = "EnGenius EWS377AP v3"` (etc.)
++- `qcom,ath11k-calibration-variant = "EnGenius-EWS377AP-v3"` (etc.)
++- Any device-specific overrides (none expected based on firmware analysis)
++
++#### 2. Image Makefile (`target/linux/qualcommax/image/ipq807x.mk`)
++
++Add two new device blocks:
++
++```makefile
++define Device/engenius_ecw230v3
++    $(call Device/FitImage)
++    $(call Device/UbiFit)
++    DEVICE_VENDOR := EnGenius
++    DEVICE_MODEL := ECW230
++    DEVICE_VARIANT := v3
++    BLOCKSIZE := 128k
++    PAGESIZE := 2048
++    SOC := ipq8072
++    DEVICE_DTS_CONFIG := config@hk07
++    DEVICE_PACKAGES := ipq-wifi-engenius_ecw230v3
++    ARTIFACTS := web-ui-factory.fit
++    ARTIFACT/web-ui-factory.fit := append-image initramfs-uImage.itb | \
++        ubinize-kernel | qsdk-ipq-factory-nand
++endef
++TARGET_DEVICES += engenius_ecw230v3
++
++define Device/engenius_ews377-fit
++    $(call Device/FitImage)
++    $(call Device/UbiFit)
++    DEVICE_VENDOR := EnGenius
++    DEVICE_MODEL := EWS377-FIT
++    BLOCKSIZE := 128k
++    PAGESIZE := 2048
++    SOC := ipq8072
++    DEVICE_DTS_CONFIG := config@hk07
++    DEVICE_PACKAGES := ipq-wifi-engenius_ews377-fit
++    ARTIFACTS := web-ui-factory.fit
++    ARTIFACT/web-ui-factory.fit := append-image initramfs-uImage.itb | \
++        ubinize-kernel | qsdk-ipq-factory-nand
++endef
++TARGET_DEVICES += engenius_ews377-fit
++```
++
++**Open question for ECW230v3:** The stock firmware defaults to
++`config@hk08`. Need to verify on hardware whether the ECW230v3 u-boot
++selects `config@hk07` or `config@hk08`. If hk08, set
++`DEVICE_DTS_CONFIG := config@hk08` instead.
++
++#### 3. WiFi board data
++
++**`package/firmware/ipq-wifi/Makefile`** — add two new entries:
++```makefile
++$(eval $(call generate-ipq-wifi-package,engenius_ecw230v3,EnGenius ECW230v3))
++$(eval $(call generate-ipq-wifi-package,engenius_ews377-fit,EnGenius EWS377-FIT))
++```
++
++**`package/firmware/ipq-wifi/files/`** — add board data files:
++- `board-engenius_ecw230v3.ipq8074` — wrap `bdwlan.b290` from ECW230v3
++  firmware with variant `EnGenius-ECW230v3`
++- `board-engenius_ews377-fit.ipq8074` — can likely reuse the EWS377AP v3
++  data with variant `EnGenius-EWS377-FIT`, or extract from EWS377-FIT
++  firmware. Needs radio test to confirm.
++
++#### 4. Base files
++
++**`02_network`** — add new compatible strings to the existing
++`ucidef_set_interface_lan "lan" "dhcp"` case:
++```sh
++engenius,ecw230v3|\
++engenius,ews377-fit|\
++engenius,ews377ap-v3|\
++```
++
++**`11-ath11k-caldata`** — add new compatible strings to the
++`caldata_extract "0:art" 0x1000 0x20000` case.
++
++**`platform.sh`** — add all three to the `nand_do_upgrade` case
++(EWS377AP v3 is currently **missing** from this file — a bug).
++
++#### 5. Web-upload factory images (`mksenaofw`)
++
++Each SKU needs its own product_id in the Senao header:
++- EWS377AP v3: `product_id = 0x011a` (282)
++- ECW230v3: `product_id = 0x011c` (284)
++- EWS377-FIT: `product_id = 0x012c` (300)
++
++The web-ui-factory.fit artifact pipeline already exists for EWS377AP v3.
++The same pipeline works for sibling SKUs — only the product_id in the
++Senao wrapper header changes. The `qsdk-ipq-factory-nand` image builder
++needs to be parameterized per-device, or separate artifact rules added.
++
++## Existing EWS377AP v3 bugs found during analysis
++
++1. **Missing `platform.sh` entry** — `engenius,ews377ap-v3` is not in
++   the `nand_do_upgrade` case. Sysupgrade will fail.
++2. **Missing `ubi.block=0,rootfs` in bootargs** — the DTS has
++   `root=/dev/ubiblock0_1` but omits the `ubi.block=0,rootfs` that
++   creates the UBI block device. WAX218 includes both.
++3. **No MAC address nvmem** — the DTS has no `nvmem-cells` for reading
++   the MAC address from u-boot env, unlike WAX218. The LAN port may get
++   a random MAC across reboots.
++
++## Pre-implementation blockers
++
++Before any code changes for ECW230v3 and EWS377-FIT:
++
++1. **ECW230v3 `config@hk07` vs `config@hk08`** — must determine which
++   config the ECW230v3 u-boot selects. Requires UART console access to
++   an ECW230v3 unit and a boot log capture.
++2. **Board data radio testing** — must verify both radios work correctly
++   with the extracted board data on each physical unit.
++3. **Board data licensing** — extraction proves hardware works; shipping
++   requires redistribution rights verification per the playbook (step 4).
++4. **Per-unit evidence** — each SKU needs its own evidence archive per
++   the playbook (step 0): boot logs, dtb extraction, gpio verification,
++   MAC source identification.
+diff --git a/package/firmware/ipq-wifi/Makefile b/package/firmware/ipq-wifi/Makefile
+index d44c6778bc..dc3fcf8f75 100644
+--- a/package/firmware/ipq-wifi/Makefile
++++ b/package/firmware/ipq-wifi/Makefile
+@@ -52,7 +52,9 @@ ALLWIFIBOARDS:= \
+ 	dynalink_dl-wrx36 \
+ 	edgecore_eap102 \
+ 	edimax_cax1800 \
++	engenius_ecw230v3 \
+ 	engenius_ews377ap-v3 \
++	engenius_ews377-fit \
+ 	elecom_wrc-x3000gs2 \
+ 	glinet_gl-ax1800 \
+ 	glinet_gl-axt1800 \
+@@ -259,10 +261,9 @@ $(eval $(call generate-ipq-wifi-package,compex_wpq873,Compex WPQ-873))
+ $(eval $(call generate-ipq-wifi-package,dynalink_dl-wrx36,Dynalink DL-WRX36))
+ $(eval $(call generate-ipq-wifi-package,edgecore_eap102,Edgecore EAP102))
+ $(eval $(call generate-ipq-wifi-package,edimax_cax1800,Edimax CAX1800))
+-# EWS377AP v3: board-2.bin candidate provided in files/board-engenius_ews377ap-v3.ipq8074
+-# (bdwlan.b290 from OEM firmware, board_id 0x290=656). Confirm the exact ath11k
+-# board-id string from the first boot log. See PORT-STATUS-ews377ap-v3.md.
++$(eval $(call generate-ipq-wifi-package,engenius_ecw230v3,EnGenius ECW230v3))
+ $(eval $(call generate-ipq-wifi-package,engenius_ews377ap-v3,EnGenius EWS377AP v3))
++$(eval $(call generate-ipq-wifi-package,engenius_ews377-fit,EnGenius EWS377-FIT))
+ $(eval $(call generate-ipq-wifi-package,elecom_wrc-x3000gs2,ELECOM WRC-X3000GS2))
+ $(eval $(call generate-ipq-wifi-package,glinet_gl-ax1800,GL.iNet GL-AX1800))
+ $(eval $(call generate-ipq-wifi-package,glinet_gl-axt1800,GL.iNet GL-AXT1800))
+diff --git a/package/firmware/ipq-wifi/files/board-engenius_ecw230v3.ipq8074 b/package/firmware/ipq-wifi/files/board-engenius_ecw230v3.ipq8074
+new file mode 100644
+index 0000000000000000000000000000000000000000..742721d8818720629a02fce133bd998d7dc840a1
+GIT binary patch
+literal 131180
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/package/firmware/ipq-wifi/files/board-engenius_ews377-fit.ipq8074 b/package/firmware/ipq-wifi/files/board-engenius_ews377-fit.ipq8074
+new file mode 100644
+index 0000000000000000000000000000000000000000..a5d36a0912d1760f864f3eea6699a8a4e9474a31
+GIT binary patch
+literal 131184
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/target/linux/qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi b/target/linux/qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi
+new file mode 100644
+index 0000000000..916a184111
+--- /dev/null
++++ b/target/linux/qualcommax/dts/ipq8072-engenius-ap-hk07.dtsi
+@@ -0,0 +1,164 @@
++// SPDX-License-Identifier: GPL-2.0-or-later OR BSD-2-Clause
++/*
++ * Shared hardware for EnGenius AP-HK07 family (IPQ8072A):
++ *   EWS377AP v3, ECW230v3, EWS377-FIT
++ *
++ * All three share identical board hardware: same LEDs (GPIO 54/55/56),
++ * same reset button (GPIO 52), same ethernet (QCA8081 @ MDIO addr 28,
++ * 2.5GbE on ESS port 6 via uniphy2), same NAND (128k/2048, SMEM
++ * partitions), same WiFi (QCN5024 + QCN5054, board_id 0x290).
++ *
++ * GPIO/LED/PHY values confirmed from vendor device tree fdt@hk07
++ * extracted from stock firmware.
++ */
++
++/dts-v1/;
++
++#include "ipq8074.dtsi"
++#include "ipq8074-nss.dtsi"
++#include "ipq8074-hk-cpu.dtsi"
++#include "ipq8074-ess.dtsi"
++#include <dt-bindings/leds/common.h>
++#include <dt-bindings/input/input.h>
++#include <dt-bindings/gpio/gpio.h>
++
++/ {
++	aliases {
++		serial0 = &blsp1_uart5;
++		led-boot = &led_blue;
++		led-failsafe = &led_red;
++		led-running = &led_blue;
++		led-upgrade = &led_green;
++	};
++
++	chosen {
++		stdout-path = "serial0,115200n8";
++		bootargs-append = " ubi.block=0,rootfs root=/dev/ubiblock0_1";
++	};
++
++	keys {
++		compatible = "gpio-keys";
++
++		reset {
++			label = "reset";
++			gpios = <&tlmm 52 GPIO_ACTIVE_LOW>;
++			linux,code = <KEY_RESTART>;
++		};
++	};
++
++	leds {
++		compatible = "gpio-leds";
++
++		led_red: led-red {
++			function = LED_FUNCTION_STATUS;
++			color = <LED_COLOR_ID_RED>;
++			gpios = <&tlmm 54 GPIO_ACTIVE_HIGH>;
++		};
++
++		led_green: led-green {
++			function = LED_FUNCTION_STATUS;
++			color = <LED_COLOR_ID_GREEN>;
++			gpios = <&tlmm 55 GPIO_ACTIVE_HIGH>;
++		};
++
++		led_blue: led-blue {
++			function = LED_FUNCTION_STATUS;
++			color = <LED_COLOR_ID_BLUE>;
++			gpios = <&tlmm 56 GPIO_ACTIVE_HIGH>;
++		};
++	};
++};
++
++&blsp1_uart5 {
++	status = "okay";
++};
++
++&tlmm {
++	mdio_pins: mdio-pins {
++		mdc {
++			pins = "gpio68";
++			function = "mdc";
++			drive-strength = <8>;
++			bias-pull-up;
++		};
++
++		mdio {
++			pins = "gpio69";
++			function = "mdio";
++			drive-strength = <8>;
++			bias-pull-up;
++		};
++	};
++};
++
++&mdio {
++	status = "okay";
++	pinctrl-0 = <&mdio_pins>;
++	pinctrl-names = "default";
++	reset-gpios = <&tlmm 43 GPIO_ACTIVE_HIGH>;
++
++	qca8081_28: ethernet-phy@28 {
++		compatible = "ethernet-phy-id004d.d101";
++		reg = <28>;
++	};
++};
++
++&uniphy2 {
++	status = "okay";
++};
++
++&switch {
++	status = "okay";
++
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			ethernet = <&edma>;
++			phy-mode = "internal";
++
++			fixed-link {
++				speed = <1000>;
++				full-duplex;
++			};
++		};
++
++		swport6: port@6 {
++			reg = <6>;
++			label = "lan";
++			phy-handle = <&qca8081_28>;
++			phy-mode = "2500base-x";
++			pcs-handle = <&uniphy2 0>;
++		};
++	};
++};
++
++&edma {
++	status = "okay";
++};
++
++&qpic_bam {
++	status = "okay";
++};
++
++&qpic_nand {
++	status = "okay";
++
++	nand@0 {
++		reg = <0>;
++		nand-ecc-strength = <4>;
++		nand-ecc-step-size = <512>;
++		nand-bus-width = <8>;
++
++		partitions {
++			compatible = "qcom,smem-part";
++		};
++	};
++};
++
++&wifi {
++	status = "okay";
++	qcom,ath11k-fw-memory-mode = <1>;
++};
+diff --git a/target/linux/qualcommax/dts/ipq8072-engenius-ecw230v3.dts b/target/linux/qualcommax/dts/ipq8072-engenius-ecw230v3.dts
+new file mode 100644
+index 0000000000..dd1d16388d
+--- /dev/null
++++ b/target/linux/qualcommax/dts/ipq8072-engenius-ecw230v3.dts
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: GPL-2.0-or-later OR BSD-2-Clause
++/*
++ * EnGenius ECW230v3 — cloud-managed AP, product_id 0x011c
++ *
++ * No hardware access; candidate support based on firmware analysis.
++ * Stock firmware defaults to config@hk08 but contains an identical
++ * fdt@hk07 DTB — using config@hk07 here (same board hardware as
++ * EWS377AP v3). Community testers: if bootipq selects hk08, change
++ * DEVICE_DTS_CONFIG in ipq807x.mk.
++ */
++
++#include "ipq8072-engenius-ap-hk07.dtsi"
++
++/ {
++	model = "EnGenius ECW230v3";
++	compatible = "engenius,ecw230v3", "qcom,ipq8074";
++};
++
++&wifi {
++	qcom,ath11k-calibration-variant = "EnGenius-ECW230v3";
++};
+diff --git a/target/linux/qualcommax/dts/ipq8072-engenius-ews377-fit.dts b/target/linux/qualcommax/dts/ipq8072-engenius-ews377-fit.dts
+new file mode 100644
+index 0000000000..2004bdd49c
+--- /dev/null
++++ b/target/linux/qualcommax/dts/ipq8072-engenius-ews377-fit.dts
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: GPL-2.0-or-later OR BSD-2-Clause
++/*
++ * EnGenius EWS377-FIT — FIT-controller managed AP, product_id 0x012c
++ *
++ * No hardware access; candidate support based on firmware analysis.
++ * Board data differs from EWS377AP v3 by only 56 bytes (0.04%).
++ */
++
++#include "ipq8072-engenius-ap-hk07.dtsi"
++
++/ {
++	model = "EnGenius EWS377-FIT";
++	compatible = "engenius,ews377-fit", "qcom,ipq8074";
++};
++
++&wifi {
++	qcom,ath11k-calibration-variant = "EnGenius-EWS377-FIT";
++};
+diff --git a/target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts b/target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts
+index 34424d78f5..b48d40c4a0 100644
+--- a/target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts
++++ b/target/linux/qualcommax/dts/ipq8072-ews377ap-v3.dts
+@@ -1,229 +1,15 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later OR BSD-2-Clause
+ /*
+- * EnGenius EWS377AP v3  (Qualcomm IPQ8072A, board "ap-hk07")
+- *
+- * Base structure derived from ipq8072-eap660hd-v1.dts (TP-Link EAP660 HD v1),
+- * the closest in-tree IPQ8072 4x4 AP. GPIO/LED/PHY values below marked
+- * "CONFIRMED (OEM hk07 DTB)" were transcribed from the vendor device tree
+- * fdt@hk07 (default config) extracted from stock firmware EWS377-FIT 1.1.30
+- * — model "Qualcomm IPQ807x/AP-HK07". Values still marked TODO(extract)
+- * need the running unit / UART. Not yet flash-validated.
++ * EnGenius EWS377AP v3 — managed AP (ezMaster), product_id 0x011a
+  */
+ 
+-/dts-v1/;
+-
+-#include "ipq8074.dtsi"
+-#include "ipq8074-nss.dtsi"
+-#include "ipq8074-hk-cpu.dtsi"
+-#include "ipq8074-ess.dtsi"
+-#include <dt-bindings/leds/common.h>
+-#include <dt-bindings/input/input.h>
+-#include <dt-bindings/gpio/gpio.h>
++#include "ipq8072-engenius-ap-hk07.dtsi"
+ 
+ / {
+ 	model = "EnGenius EWS377AP v3";
+ 	compatible = "engenius,ews377ap-v3", "qcom,ipq8074";
+-
+-	aliases {
+-		serial0 = &blsp1_uart5;
+-		led-boot = &led_blue;
+-		led-failsafe = &led_red;
+-		led-running = &led_blue;
+-		led-upgrade = &led_green;
+-	};
+-
+-	chosen {
+-		stdout-path = "serial0,115200n8";
+-		bootargs-append = " root=/dev/ubiblock0_1";
+-	};
+-
+-	keys {
+-		compatible = "gpio-keys";
+-
+-		/* CONFIRMED (OEM hk07 DTB): reset on GPIO52, active-low */
+-		reset {
+-			label = "reset";
+-			gpios = <&tlmm 52 GPIO_ACTIVE_LOW>;
+-			linux,code = <KEY_RESTART>;
+-		};
+-	};
+-
+-	/*
+-	 * CONFIRMED (OEM hk07 DTB): single RGB status LED, active-high, on
+-	 * GPIO54 (R) / GPIO55 (G) / GPIO56 (B). Vendor labels: led_r/led_g/led_b.
+-	 */
+-	leds {
+-		compatible = "gpio-leds";
+-
+-		led_red: led-red {
+-			function = LED_FUNCTION_STATUS;
+-			color = <LED_COLOR_ID_RED>;
+-			gpios = <&tlmm 54 GPIO_ACTIVE_HIGH>;
+-		};
+-
+-		led_green: led-green {
+-			function = LED_FUNCTION_STATUS;
+-			color = <LED_COLOR_ID_GREEN>;
+-			gpios = <&tlmm 55 GPIO_ACTIVE_HIGH>;
+-		};
+-
+-		led_blue: led-blue {
+-			function = LED_FUNCTION_STATUS;
+-			color = <LED_COLOR_ID_BLUE>;
+-			gpios = <&tlmm 56 GPIO_ACTIVE_HIGH>;
+-		};
+-	};
+-};
+-
+-&blsp1_uart5 {
+-	status = "okay";
+-};
+-
+-&tlmm {
+-	mdio_pins: mdio-pins {
+-		mdc {
+-			pins = "gpio68";
+-			function = "mdc";
+-			drive-strength = <8>;
+-			bias-pull-up;
+-		};
+-
+-		mdio {
+-			pins = "gpio69";
+-			function = "mdio";
+-			drive-strength = <8>;
+-			bias-pull-up;
+-		};
+-	};
+-};
+-
+-&mdio {
+-	status = "okay";
+-	pinctrl-0 = <&mdio_pins>;
+-	pinctrl-names = "default";
+-	/*
+-	 * CONFIRMED (OEM hk07 DTB): phy-reset-gpio = GPIO43 (active-high) +
+-	 * GPIO44 (active-low). QSDK drives both; mainline resets the bus once,
+-	 * so assert the primary line. TODO(validate): confirm on hardware that
+-	 * a single reset on GPIO43 brings all PHYs up.
+-	 */
+-	reset-gpios = <&tlmm 43 GPIO_ACTIVE_HIGH>;
+-
+-	/*
+-	 * CONFIRMED (OEM hk07 DTB): the single external uplink PHY is a 2.5G
+-	 * QCA8081 at MDIO addr 0x1c (28) — ESS port 6, uniphy2, USXGMII
+-	 * (switch_mac_mode2 = 0x0f in the OEM DTS). This is the EWS377's PoE
+-	 * uplink. Use the QCA8081 phy-id compatible as the in-tree IPQ8072 2.5G
+-	 * APs do (e.g. ipq8071-ap8220).
+-	 */
+-	qca8081_28: ethernet-phy@28 {
+-		compatible = "ethernet-phy-id004d.d101";
+-		reg = <28>;
+-	};
+-
+-	/*
+-	 * CONFIRMED (OEM hk07 DTB) but NOT wired here: the reference board also
+-	 * carries a QCA8075 5-port gigabit block (uniphy0, PSGMII,
+-	 * switch_mac_mode = 0x00) on ports 1-5 / OEM phy addr 0-4. A ceiling AP
+-	 * like the EWS377 almost certainly does not expose these, so they are
+-	 * omitted. TODO(validate on hardware): if a gigabit port IS present,
+-	 * add a qca8075-package node + the relevant port@1..5 with
+-	 * phy-mode "qsgmii" / pcs-handle <&uniphy0 N>. Note the OEM strap uses
+-	 * PHY base address 0-4 (mainline QCA8075 examples use 16-19) — verify
+-	 * the actual straps before enabling.
+-	 */
+-};
+-
+-&uniphy2 {
+-	status = "okay";
+-};
+-
+-&switch {
+-	status = "okay";
+-
+-	ports {
+-		#address-cells = <1>;
+-		#size-cells = <0>;
+-
+-		port@0 {
+-			reg = <0>;
+-			ethernet = <&edma>;
+-			phy-mode = "internal";
+-
+-			fixed-link {
+-				speed = <1000>;
+-				full-duplex;
+-			};
+-		};
+-
+-		/*
+-		 * CONFIRMED (OEM hk07 DTB): 2.5G uplink = ESS port 6, phy@28,
+-		 * uniphy2. Labeled "lan" (AP uplink / bridge member), matching how
+-		 * managed APs present their single port under OpenWrt.
+-		 */
+-		swport6: port@6 {
+-			reg = <6>;
+-			label = "lan";
+-			phy-handle = <&qca8081_28>;
+-			phy-mode = "2500base-x";
+-			pcs-handle = <&uniphy2 0>;
+-		};
+-	};
+-};
+-
+-&edma {
+-	status = "okay";
+-};
+-
+-&qpic_bam {
+-	status = "okay";
+-};
+-
+-&qpic_nand {
+-	status = "okay";
+-
+-	nand@0 {
+-		reg = <0>;
+-		nand-ecc-strength = <4>;
+-		nand-ecc-step-size = <512>;
+-		nand-bus-width = <8>;
+-
+-		/*
+-		 * OEM firmware is QSDK OpenWrt and defines the partition table in
+-		 * SMEM, so the layout (DEVCFG/APPSBLENV/APPSBL/cert/ART/rootfs A/B)
+-		 * is read automatically here — no hand-written offsets needed.
+-		 */
+-		partitions {
+-			compatible = "qcom,smem-part";
+-		};
+-	};
+ };
+ 
+ &wifi {
+-	status = "okay";
+-	/*
+-	 * fw-memory-mode 1 = reduced footprint (8 vdevs / 128 peers) that fits
+-	 * without a large reserved host-DDR region. REQUIRED: absent, ath11k
+-	 * defaults to mode 0 and the Q6 firmware-memory/QMI handshake stalls at
+-	 * WCSS coldboot calibration (observed: soc_id 0xffffffff, hang after
+-	 * "htt event 48 not handled"). Matches the working AX3600 and the OEM
+-	 * DTB's qcom,tgt-mem-mode = <1>.
+-	 */
+-	qcom,ath11k-fw-memory-mode = <1>;
+-	/*
+-	 * CONFIRMED (OEM DTBs): qcom,board_id = <0x290> → board-data "bdwlan.b290"
+-	 * (shared with ECW230v3). But ath11k at runtime requests the unfused id
+-	 * qmi-board-id=255 disambiguated by this variant string; the
+-	 * ipq-wifi-engenius_ews377ap-v3 board-2.bin is keyed to match.
+-	 */
+ 	qcom,ath11k-calibration-variant = "EnGenius-EWS377AP-v3";
+ };
+-
+-/*
+- * LED note: the OEM also drives functional indicators (power/lan/2.4G/5G/
+- * scan/ble) through the Qualcomm "qca,ledc" hardware LED controller
+- * (reg 0x191e000, serial clk/data/clr on gpio18/19/20). Mainline OpenWrt has
+- * NO qca,ledc driver, so those are not wired here. The user-facing RGB status
+- * LED is a plain gpio-leds on GPIO54/55/56 (confirmed in both OEM DTBs) and IS
+- * driven above — it produces the blue/amber/red status the unit shows.
+- */
+diff --git a/target/linux/qualcommax/image/ipq807x.mk b/target/linux/qualcommax/image/ipq807x.mk
+index 489ffa2596..ea0709c941 100644
+--- a/target/linux/qualcommax/image/ipq807x.mk
++++ b/target/linux/qualcommax/image/ipq807x.mk
+@@ -191,53 +191,46 @@ define Device/edimax_cax1800
+ endef
+ TARGET_DEVICES += edimax_cax1800
+ 
+-# SCAFFOLD — EnGenius EWS377AP v3 (IPQ8072A, board ap-hk07).
+-# The FitImage/UbiFit sysupgrade path is the primary install route once
+-# OpenWrt is running. The web-ui-factory.bin wraps the image in a Senao
+-# header so the OEM LuCI updater accepts it (check_senao_image_header.sh
+-# gates on vendor_id + product_id only):
+-#   vendor_id  257 (0x0101)   product_id 282 (0x011a)  -> EWS377AP v3
+-# Confirm the exact mksenaofw flag mapping against a de-obfuscated OEM .bin
+-# before relying on the factory image; the sysupgrade path is what to test
+-# first (via u-boot / a shelled OEM slot).
+-define Device/engenius_ews377ap-v3
++define Device/engenius_ap-hk07
+ 	$(call Device/FitImage)
+ 	$(call Device/UbiFit)
+ 	DEVICE_VENDOR := EnGenius
+-	DEVICE_MODEL := EWS377AP
+-	DEVICE_VARIANT := v3
+ 	BLOCKSIZE := 128k
+ 	PAGESIZE := 2048
+ 	SOC := ipq8072
+-	# OEM bootipq selects the FIT config by board name (config@hk07) and
+-	# aborts with "Config not availabale" on a FIT that only defines the
+-	# default config@1 (confirmed on hardware 2026-09-06: bootm#config@1
+-	# boots our kernel fine, but bootipq's own board-name lookup fails).
+-	# Name the config config@hk07 like the sibling ap-hk07 board
+-	# (netgear_wax218) so bootipq finds it.
+ 	DEVICE_DTS_CONFIG := config@hk07
+-	DEVICE_PACKAGES := ipq-wifi-engenius_ews377ap-v3 nss-tools
+-	# Keep factory.ubi a BARE UBI (Device/UbiFit default) for the proven
+-	# UART/u-boot and SSH+ubiformat install paths (raw-nand-writable / a
+-	# valid ubiformat source; the earlier 0-byte-kernel-read failure was a
+-	# missing board-matched FIT config name, not the UBI/write, 2026-09-06).
+-	#
+-	# web-ui-factory.fit mirrors the officially-supported ap-hk07 sibling
+-	# netgear_wax218 EXACTLY (same SoC/bootloader/board): a QSDK FIT wrapping
+-	# a kernel-only UBI built from the INITRAMFS image via ubinize-kernel,
+-	# not a Senao-wrapped squashfs factory. Verified against the real
+-	# upstream netgear_wax218 web-ui-factory.fit (2026-09-07): single
+-	# dynamic "kernel" UBI volume, no rootfs volume — it boots self-contained
+-	# from RAM regardless of which A/B slot the bootloader loads, sidestepping
+-	# the slot-tracking issue upstream documents for this bootloader. Persist
+-	# it with a normal sysupgrade once already running OpenWrt (matches the
+-	# WAX218's own documented two-step web-UI install).
++	DEVICE_PACKAGES := nss-tools
++ifeq ($(IB),)
++ifneq ($(CONFIG_TARGET_ROOTFS_INITRAMFS),)
+ 	ARTIFACTS := web-ui-factory.fit
+ 	ARTIFACT/web-ui-factory.fit := append-image initramfs-uImage.itb | \
+ 		ubinize-kernel | qsdk-ipq-factory-nand
++endif
++endif
++endef
++
++define Device/engenius_ews377ap-v3
++	$(call Device/engenius_ap-hk07)
++	DEVICE_MODEL := EWS377AP
++	DEVICE_VARIANT := v3
++	DEVICE_PACKAGES += ipq-wifi-engenius_ews377ap-v3
+ endef
+ TARGET_DEVICES += engenius_ews377ap-v3
+ 
++define Device/engenius_ecw230v3
++	$(call Device/engenius_ap-hk07)
++	DEVICE_MODEL := ECW230v3
++	DEVICE_PACKAGES += ipq-wifi-engenius_ecw230v3
++endef
++TARGET_DEVICES += engenius_ecw230v3
++
++define Device/engenius_ews377-fit
++	$(call Device/engenius_ap-hk07)
++	DEVICE_MODEL := EWS377-FIT
++	DEVICE_PACKAGES += ipq-wifi-engenius_ews377-fit
++endef
++TARGET_DEVICES += engenius_ews377-fit
++
+ define Device/linksys_homewrk
+ 	$(call Device/FitImage)
+ 	$(call Device/UbiFit)
+diff --git a/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network b/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
+index ec9899a081..dd46f9dafb 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
++++ b/target/linux/qualcommax/ipq807x/base-files/etc/board.d/02_network
+@@ -60,7 +60,9 @@ ipq807x_setup_interfaces()
+ 	netgear,sxs80)
+ 		ucidef_set_interfaces_lan_wan "lan2 lan3 lan4 lan5" "wan"
+ 		;;
++	engenius,ecw230v3|\
+ 	engenius,ews377ap-v3|\
++	engenius,ews377-fit|\
+ 	netgear,wax218|\
+ 	netgear,wax620)
+ 		ucidef_set_interface_lan "lan" "dhcp"
+diff --git a/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata b/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+index a836fbd691..12ab1ffbb6 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
++++ b/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+@@ -26,7 +26,9 @@ case "$FIRMWARE" in
+ 	compex,wpq873|\
+ 	edgecore,eap102|\
+ 	edimax,cax1800|\
++	engenius,ecw230v3|\
+ 	engenius,ews377ap-v3|\
++	engenius,ews377-fit|\
+ 	linksys,mx5300|\
+ 	netgear,wax218|\
+ 	redmi,ax6|\
+diff --git a/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh b/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
+index b9a25bc7b2..f249944e42 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
++++ b/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
+@@ -179,6 +179,9 @@ platform_do_upgrade() {
+ 	compex,wpq873|\
+ 	dynalink,dl-wrx36|\
+ 	edimax,cax1800|\
++	engenius,ecw230v3|\
++	engenius,ews377ap-v3|\
++	engenius,ews377-fit|\
+ 	netgear,rax120v2|\
+ 	netgear,rbr750|\
+ 	netgear,rbr850|\

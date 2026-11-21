@@ -1,0 +1,121 @@
+From ddbd0df6aa340cb3b1ec0dc2e7ac001821bcbce1 Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Wed, 2 Sep 2026 06:47:55 -0700
+Subject: [PATCH 03/50] =?UTF-8?q?qualcommax:=20ipq807x:=20EWS377AP=20v3=20?=
+ =?UTF-8?q?=E2=80=94=20draft=20Ethernet=20from=20confirmed=20OEM=20topolog?=
+ =?UTF-8?q?y?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Translate the OEM hk07 ess-switch topology to mainline bindings: the 2.5G
+uplink is ESS port 6 / QCA8081 @ MDIO 28 via uniphy2 (USXGMII,
+switch_mac_mode2=0x0f), not port5/uniphy1 as the initial EAP660HD-derived
+scaffold had it. Use the QCA8081 phy-id compatible (ethernet-phy-id004d.d101)
+and enable uniphy2, matching the in-tree ipq8071-ap8220 2.5G AP. Document
+the omitted QCA8075 5xGbE block (uniphy0/PSGMII) for hardware validation.
+MDIO pins (mdc=gpio68/mdio=gpio69) confirmed against the OEM pinmux.
+---
+ PORT-STATUS-ews377ap-v3.md                    | 15 +++++--
+ .../dts/ipq8072-engenius-ews377ap-v3.dts      | 39 +++++++++++++------
+ 2 files changed, 38 insertions(+), 16 deletions(-)
+
+diff --git a/PORT-STATUS-ews377ap-v3.md b/PORT-STATUS-ews377ap-v3.md
+index 36ae34fd34..de901735cb 100644
+--- a/PORT-STATUS-ews377ap-v3.md
++++ b/PORT-STATUS-ews377ap-v3.md
+@@ -28,8 +28,14 @@ decompiled it — model *"Qualcomm IPQ807x/AP-HK07"*, i.e. exactly this board. V
+ 
+ - **LEDs:** single RGB status LED, active-high — GPIO **54** (R) / **55** (G) / **56** (B).
+ - **Reset button:** GPIO **52**, active-low, `KEY_RESTART`.
+-- **MDIO/PHY:** internal gigabit PHYs at addr 0–4; **2.5G uplink PHY (QCA8081) at addr 28** (ESS
+-  port 6 / WAN in the reference). PHY reset via GPIO **43** (active-high) + GPIO **44** (active-low).
++- **MDIO/PHY:** internal gigabit PHYs at addr 0–4; **2.5G uplink PHY (QCA8081) at addr 28**. PHY
++  reset via GPIO **43** (active-high) + GPIO **44** (active-low). MDIO pins: mdc=gpio68, mdio=gpio69.
++- **Ethernet topology (fully translated to mainline bindings):** uniphy0 = QCA8075 5×GbE on ports
++  1–5 (PSGMII, `switch_mac_mode=0x00`); uniphy2 = the 2.5G QCA8081 on **ESS port 6** (USXGMII,
++  `switch_mac_mode2=0x0f`); uniphy1 unused. `switch_cpu_bmp=0x01`, `lan_bmp=0x3e`, `wan_bmp=0x40`.
++  The DTS wires the confirmed uplink as `port@6` → `qca8081_28` (`ethernet-phy-id004d.d101`),
++  `phy-mode="2500base-x"`, `pcs-handle=<&uniphy2 0>` — matching the in-tree `ipq8071-ap8220` 2.5G AP.
++  The 5× gigabit block is documented but omitted (AP almost certainly doesn't expose it).
+ - **Partitions:** OEM defines them in SMEM (QSDK), so `qcom,smem-part` auto-reads the layout.
+ - **WiFi firmware:** QSDK `WLAN.HK.2.5.r4-00745` (QCA8074_v2). Board-data set extracted: default
+   `bdwlan.bin == bdwlan.b210`; the note confirms **ECW230v3 uses `bdwlan.b290`**.
+@@ -44,8 +50,9 @@ Extraction artifacts (decompiled OEM DTS + board-data blobs + notes) are staged
+    chip at probe. Read it from the first ath11k boot log, then pack the matching `bdwlan` blob into a
+    `board-2.bin` (via `ath11k-bdencoder`) as `package/firmware/ipq-wifi/board-engenius_ews377ap-v3.*`
+    and set the DTS `qcom,ath11k-calibration-variant` to match.
+-3. **Ethernet port population** — confirm whether any gigabit port (phy 0–4) is physically exposed on
+-   the EWS377 enclosure, or only the 2.5G PoE uplink.
++3. **Ethernet port population** — the 2.5G uplink DTS is done; only need to confirm on hardware
++   whether any gigabit port (phy 0–4) is *physically exposed* on the EWS377 enclosure (if so, add the
++   documented QCA8075 block — and check the 0–4 vs 16–19 PHY strap).
+ 4. **Install format** — verify the exact `mksenaofw` flag mapping (vendor 0x0101 / product 0x011a)
+    against a de-obfuscated OEM `.bin` before shipping the factory image.
+ 5. **PHY reset** — confirm a single reset on GPIO43 brings all PHYs up (QSDK toggles 43+44).
+diff --git a/target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts b/target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts
+index 4d9aa1c97a..9b6f0bf94a 100644
+--- a/target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts
++++ b/target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts
+@@ -110,20 +110,31 @@
+ 	reset-gpios = <&tlmm 43 GPIO_ACTIVE_HIGH>;
+ 
+ 	/*
+-	 * CONFIRMED (OEM hk07 DTB): MDIO bus has internal PHYs at addr 0-4
+-	 * (gigabit) and the uplink PHY at addr 0x1c (28) — the 2.5G QCA8081,
+-	 * ESS port 6 / WAN in the reference design. As a managed AP the EWS377
+-	 * uses this 2.5G port as its single PoE uplink.
+-	 * TODO(validate): whether any gigabit port (phy 0-4) is physically
+-	 * populated on the EWS377AP v3 enclosure.
++	 * CONFIRMED (OEM hk07 DTB): the single external uplink PHY is a 2.5G
++	 * QCA8081 at MDIO addr 0x1c (28) — ESS port 6, uniphy2, USXGMII
++	 * (switch_mac_mode2 = 0x0f in the OEM DTS). This is the EWS377's PoE
++	 * uplink. Use the QCA8081 phy-id compatible as the in-tree IPQ8072 2.5G
++	 * APs do (e.g. ipq8071-ap8220).
+ 	 */
+ 	qca8081_28: ethernet-phy@28 {
+-		compatible = "ethernet-phy-ieee802.3-c22";
++		compatible = "ethernet-phy-id004d.d101";
+ 		reg = <28>;
+ 	};
++
++	/*
++	 * CONFIRMED (OEM hk07 DTB) but NOT wired here: the reference board also
++	 * carries a QCA8075 5-port gigabit block (uniphy0, PSGMII,
++	 * switch_mac_mode = 0x00) on ports 1-5 / OEM phy addr 0-4. A ceiling AP
++	 * like the EWS377 almost certainly does not expose these, so they are
++	 * omitted. TODO(validate on hardware): if a gigabit port IS present,
++	 * add a qca8075-package node + the relevant port@1..5 with
++	 * phy-mode "qsgmii" / pcs-handle <&uniphy0 N>. Note the OEM strap uses
++	 * PHY base address 0-4 (mainline QCA8075 examples use 16-19) — verify
++	 * the actual straps before enabling.
++	 */
+ };
+ 
+-&uniphy1 {
++&uniphy2 {
+ 	status = "okay";
+ };
+ 
+@@ -145,13 +156,17 @@
+ 			};
+ 		};
+ 
+-		/* TODO(extract): confirm ESS port index + link speed for the uplink */
+-		swport5: port@5 {
+-			reg = <5>;
++		/*
++		 * CONFIRMED (OEM hk07 DTB): 2.5G uplink = ESS port 6, phy@28,
++		 * uniphy2. Labeled "lan" (AP uplink / bridge member), matching how
++		 * managed APs present their single port under OpenWrt.
++		 */
++		swport6: port@6 {
++			reg = <6>;
+ 			label = "lan";
+ 			phy-handle = <&qca8081_28>;
+ 			phy-mode = "2500base-x";
+-			pcs-handle = <&uniphy1 0>;
++			pcs-handle = <&uniphy2 0>;
+ 		};
+ 	};
+ };

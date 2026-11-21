@@ -1,0 +1,321 @@
+From 2827b3ac2a99e13498a9b68a83b2869ca725a4a1 Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Thu, 3 Sep 2026 14:43:55 -0700
+Subject: [PATCH 07/50] ews377ap-v3: add candidate board-2.bin, research notes,
+ NAND size
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- ipq-wifi: files/board-engenius_ews377ap-v3.ipq8074 — bdwlan.b290 packed
+  via ath11k-bdencoder, keyed qmi-board-id=656 (0x290) bare + variant.
+- research-notes.md: IPQ807x secure-boot priors (robimarko: likely not
+  fused; Ansuel: IPQ40xx EX7700 counter-example), no existing EnGenius
+  IPQ807x port (cybrnook has EWS357/377 hw), sizing 512MB RAM / 256MiB NAND.
+- hardware-reference: NAND 256 MiB. DTS phandle refs validated vs AP8220.
+---
+ PORT-STATUS-ews377ap-v3.md                    |  12 +++---
+ ews377ap-v3-port/README.md                    |   1 +
+ ews377ap-v3-port/hardware-reference.md        |   1 +
+ ews377ap-v3-port/research-notes.md            |  36 ++++++++++++++++++
+ package/firmware/ipq-wifi/Makefile            |   5 ++-
+ .../files/board-engenius_ews377ap-v3.ipq8074  | Bin 0 -> 131232 bytes
+ 6 files changed, 47 insertions(+), 8 deletions(-)
+ create mode 100644 ews377ap-v3-port/research-notes.md
+ create mode 100644 package/firmware/ipq-wifi/files/board-engenius_ews377ap-v3.ipq8074
+
+diff --git a/PORT-STATUS-ews377ap-v3.md b/PORT-STATUS-ews377ap-v3.md
+index aa08085c41..8d6cb20fe4 100644
+--- a/PORT-STATUS-ews377ap-v3.md
++++ b/PORT-STATUS-ews377ap-v3.md
+@@ -52,12 +52,12 @@ Extraction artifacts (decompiled OEM DTS + board-data blobs + notes) are staged
+ ## Still blocking — need the running unit / UART (ETA ~2 days)
+ 
+ 1. **Secure-boot fuse state** — go/no-go for booting any custom image at all.
+-2. **WiFi board data** — RESOLVED to a concrete candidate: both OEM DTBs set
+-   `qcom,board_id = <0x290>`, and the OEM `senaoBDF.note` maps that to **`bdwlan.b290`** (shared with
+-   ECW230v3 — same hk07 board). Blob is staged in `ews377ap-v3-port/reference/`. Remaining: read the exact
+-   ath11k board-id/variant string from the first boot log (expected 0x290), pack `bdwlan.b290` into a
+-   `board-2.bin` via `ath11k-bdencoder`, drop it as `package/firmware/ipq-wifi/board-engenius_ews377ap-v3.*`,
+-   and align the DTS `qcom,ath11k-calibration-variant`.
++2. **WiFi board data** — ✅ **board-2.bin built & committed** at
++   `package/firmware/ipq-wifi/files/board-engenius_ews377ap-v3.ipq8074` — `bdwlan.b290` (from OEM fw,
++   board_id 0x290) packed via `ath11k-bdencoder`, keyed to `qmi-board-id=656` (bare + variant
++   `EnGenius-EWS377AP-v3`, matching the DTS). Remaining, needs first boot: confirm ath11k actually
++   requests `qmi-chip-id=0,qmi-board-id=656` (adjust the container if the log shows a different
++   chip-id/format) and verify per-device caldata handoff from ART.
+ 3. **Ethernet port population** — the 2.5G uplink DTS is done; only need to confirm on hardware
+    whether any gigabit port (phy 0–4) is *physically exposed* on the EWS377 enclosure (if so, add the
+    documented QCA8075 block — and check the 0–4 vs 16–19 PHY strap).
+diff --git a/ews377ap-v3-port/README.md b/ews377ap-v3-port/README.md
+index 4eb88f92d4..787f7ee62c 100644
+--- a/ews377ap-v3-port/README.md
++++ b/ews377ap-v3-port/README.md
+@@ -20,6 +20,7 @@ locations; this directory is the design/reference companion.
+ | `porting-plan.md` | End-to-end plan: bring-up → DTS → WiFi → NSS validation → install |
+ | `uart-extraction-plan.md` | What to pull off the unit once UART is connected |
+ | `hardware-reference.md` | MTD map, boot chain, u-boot env, recovery |
++| `research-notes.md` | Community findings: secure-boot priors, prior art, sizing |
+ | `reference/` | Decompiled OEM device trees + WiFi board data + `board-2.bin` build recipe |
+ 
+ ## Confirmed from OEM firmware (both FIT 1.1.30 and native managed v3.9.3.2)
+diff --git a/ews377ap-v3-port/hardware-reference.md b/ews377ap-v3-port/hardware-reference.md
+index 4af55f9d0b..3b2e618b33 100644
+--- a/ews377ap-v3-port/hardware-reference.md
++++ b/ews377ap-v3-port/hardware-reference.md
+@@ -9,6 +9,7 @@ fleet + de-obfuscated stock firmware. Per-device secrets (real MAC/serial) are i
+ - **WiFi:** 4×4 802.11ax dual-band (tx/rxchainmask `15` on both radios) — same board as ECW230v3 and
+   EWS377-FIT. Marketing class "AX3600". FCC + ETSI DFS certified.
+ - **RAM:** 512 MB (`MP_512`, memory reg `0x40000000` len `0x20000000` in the OEM DTB)
++- **NAND:** 256 MiB (community bootlog; OS UBI region starts at NAND `0x01000000`)
+ - **Board name:** `ap-hk07` (Qualcomm reference-design designator; also the OpenWrt board id used downstream)
+ - **Serial console:** `ttyMSM0` (blsp1_uart5), 115200n8 (OEM bootargs `console=ttyMSM0,115200,n8`)
+ - **Firmware IDs:** vendor_id 257 (`0x0101`); product_id — EWS377AP v3 = 282 (`0x011a`),
+diff --git a/ews377ap-v3-port/research-notes.md b/ews377ap-v3-port/research-notes.md
+new file mode 100644
+index 0000000000..75d62af5ea
+--- /dev/null
++++ b/ews377ap-v3-port/research-notes.md
+@@ -0,0 +1,36 @@
++# Research notes — community / secure-boot / prior art
++
++Findings from OpenWrt community sources relevant to this port (2026-09-03).
++
++## Secure boot on IPQ807x (the go/no-go)
++
++- **robimarko** (core OpenWrt IPQ maintainer), on the IPQ807x investigation thread: *"I would bet that
++  it does not have secure boot. Secure boot has been available in both IPQ806x and IPQ40xx and nobody
++  used it."* → strong prior that IPQ807x OEMs generally don't fuse secure boot.
++- **Ansuel** counters with a real counter-example: Netgear EX7700 (IPQ40xx) *did* fuse it and bricked
++  a unit trying to flash an unlocked u-boot. → not universal; still verify on the EWS377 at u-boot
++  before flashing anything to the boot chain.
++- Our own evidence points the same way: stock u-boot `bootipq` loads a FIT that is only MD5/CRC
++  checked, and the OEM rootfs does no dm-verity/signature check. Definitive check is still the u-boot
++  fuse read / unsigned `bootm` test (Phase 0).
++
++## Prior art / collaborators
++
++- **No existing EnGenius IPQ807x OpenWrt port** exists. On "Adding OpenWrt support for Senao-like
++  devices", user **cybrnook** reports having **EWS357 (v1/v3) and EWS377 (v1/v3)** hardware and wanting
++  a port ("the hardware is here"). Potential collaborator / second test unit.
++- Closest in-tree analogs already supported: Aliyun **AP8220** (IPQ8071, 2.5G on port@6/uniphy2 — our
++  Ethernet template), Netgear **WAX218/WAX620**, Dynalink DL-WRX36, EnGenius-adjacent TP-Link
++  EAP660HD. The Netgear WAX218 bootlog is cited as covering EWS377AP v3 / ECW230 v3 (same IPQ8072a,
++  512 MB RAM, 256 MiB NAND, serial 115200 8N1).
++
++## Confirmed hardware sizing
++
++- RAM **512 MB**, NAND **256 MiB**, serial **115200 8N1** (community bootlog + our DTB extraction agree).
++
++## Sources
++
++- OpenWrt forum: "IPQ807x SoC Investigation / Status [WIP]"
++- OpenWrt forum: "Adding OpenWrt support for Senao like Devices"
++- OpenWrt forum: "OpenWrt support for WAX218"
++- In-tree: `ipq8071-ap8220.dts`, `qualcommax` target
+diff --git a/package/firmware/ipq-wifi/Makefile b/package/firmware/ipq-wifi/Makefile
+index 21b514b2af..0c90726bc3 100644
+--- a/package/firmware/ipq-wifi/Makefile
++++ b/package/firmware/ipq-wifi/Makefile
+@@ -249,8 +249,9 @@ $(eval $(call generate-ipq-wifi-package,compex_wpq873,Compex WPQ-873))
+ $(eval $(call generate-ipq-wifi-package,dynalink_dl-wrx36,Dynalink DL-WRX36))
+ $(eval $(call generate-ipq-wifi-package,edgecore_eap102,Edgecore EAP102))
+ $(eval $(call generate-ipq-wifi-package,edimax_cax1800,Edimax CAX1800))
+-# SCAFFOLD: requires board-engenius_ews377ap-v3.* (the OEM board-2.bin
+-# extracted from /lib/firmware/IPQ8074), not yet committed. See PORT-STATUS.md.
++# EWS377AP v3: board-2.bin candidate provided in files/board-engenius_ews377ap-v3.ipq8074
++# (bdwlan.b290 from OEM firmware, board_id 0x290=656). Confirm the exact ath11k
++# board-id string from the first boot log. See PORT-STATUS-ews377ap-v3.md.
+ $(eval $(call generate-ipq-wifi-package,engenius_ews377ap-v3,EnGenius EWS377AP v3))
+ $(eval $(call generate-ipq-wifi-package,elecom_wrc-x3000gs2,ELECOM WRC-X3000GS2))
+ $(eval $(call generate-ipq-wifi-package,glinet_gl-ax1800,GL.iNet GL-AX1800))
+diff --git a/package/firmware/ipq-wifi/files/board-engenius_ews377ap-v3.ipq8074 b/package/firmware/ipq-wifi/files/board-engenius_ews377ap-v3.ipq8074
+new file mode 100644
+index 0000000000000000000000000000000000000000..677f3f872cfcf5acf30f1da30ec4fcb10bd69b43
+GIT binary patch
+literal 131232
+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
+
+literal 0
+HcmV?d00001
+

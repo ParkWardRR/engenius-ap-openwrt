@@ -1,0 +1,6 @@
+# Pinned base tree this overlay applies onto.
+# OpenWrt main + Julius Bairaktaris's NSS/EDMA series (kernel 6.18).
+BASE_REPO=https://github.com/JuliusBairaktaris/openwrt-nss-edma.git
+BASE_COMMIT=ef499f56f6ddeadccced3c7f97aa9c1225330ee1
+NSS_FEED_URL=https://github.com/JuliusBairaktaris/nss-packages.git
+NSS_FEED_BRANCH=edma-nss

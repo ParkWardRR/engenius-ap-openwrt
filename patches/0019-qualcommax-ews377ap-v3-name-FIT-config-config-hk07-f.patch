@@ -1,0 +1,45 @@
+From 4b045285b29024a7c284f95cdbb8fd52c740548c Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Sun, 6 Sep 2026 17:11:26 -0700
+Subject: [PATCH 19/50] qualcommax: ews377ap-v3: name FIT config config@hk07
+ for OEM bootipq
+
+Hardware evidence (2026-09-06): bootm#config@1 boots our kernel fine,
+but OEM bootipq selects the FIT config by board name (config@hk07) and
+aborts with 'Config not availabale' on our default-only config@1 FIT.
+Set DEVICE_DTS_CONFIG=config@hk07 like the sibling ap-hk07 board
+netgear_wax218 so bootipq's board-name lookup succeeds.
+---
+ target/linux/qualcommax/image/ipq807x.mk | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/target/linux/qualcommax/image/ipq807x.mk b/target/linux/qualcommax/image/ipq807x.mk
+index fabcdc272a..0ce196e192 100644
+--- a/target/linux/qualcommax/image/ipq807x.mk
++++ b/target/linux/qualcommax/image/ipq807x.mk
+@@ -209,15 +209,20 @@ define Device/engenius_ews377ap-v3
+ 	BLOCKSIZE := 128k
+ 	PAGESIZE := 2048
+ 	SOC := ipq8072
++	# OEM bootipq selects the FIT config by board name (config@hk07) and
++	# aborts with "Config not availabale" on a FIT that only defines the
++	# default config@1 (confirmed on hardware 2026-09-06: bootm#config@1
++	# boots our kernel fine, but bootipq's own board-name lookup fails).
++	# Name the config config@hk07 like the sibling ap-hk07 board
++	# (netgear_wax218) so bootipq finds it.
++	DEVICE_DTS_CONFIG := config@hk07
+ 	DEVICE_PACKAGES := ipq-wifi-engenius_ews377ap-v3
+ 	# Keep factory.ubi a BARE UBI (Device/UbiFit default) for controlled
+ 	# MTD/UBI experiments. Additionally emit a QSDK FIT updater container
+ 	# under a DISTINCT name (dumpimage-extracted by the OEM upgrade pipeline)
+-	# so a ".ubi" file never silently contains a FIT wrapper. NOTE: the OEM
+-	# QSDK u-boot's raw bootipq path (`ubi read $addr kernel; bootm`) did NOT
+-	# accept a raw nand-written bare UBI (0-byte kernel read -> safe fallback,
+-	# 2026-09-06); root cause under investigation, so keep both artifacts
+-	# distinct and do not assume the QSDK FIT is raw-nand-writable.
++	# so a ".ubi" file never silently contains a FIT wrapper. The bare UBI is
++	# raw-nand-writable to a slot; the earlier 0-byte-kernel-read failure was
++	# a missing board-matched FIT config name, not the UBI/write (2026-09-06).
+ 	IMAGES += qsdk-factory.itb
+ 	IMAGE/qsdk-factory.itb := append-ubi | qsdk-ipq-factory-nand
+ 	# TODO(install): add Senao-header factory image once flag mapping is

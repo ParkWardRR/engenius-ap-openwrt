@@ -1,0 +1,103 @@
+From 9e48728d16ea08ab71b1fe9ee0b4b62c92cdb8c5 Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Tue, 6 Oct 2026 13:06:57 -0700
+Subject: [PATCH 28/50] feat: ECW230v3 FIT carries both config@hk07 and
+ config@hk08
+
+ECW230v3 stock firmware ships its FIT with default config@hk08, unlike
+the other two SKUs (config@hk07). No ECW unit has been bench-tested, so
+the OEM u-boot's config selection is unknown; emit both configurations
+(same kernel and DTB behind each) so either one boots.
+
+- mkits.sh: a comma-separated -c list emits one configuration per name,
+  the first being the default; a single name behaves as before
+- build-skus.sh: accept an optional list of SKUs to build
+---
+ ews377ap-v3-port/build-skus.sh           |  3 ++-
+ scripts/mkits.sh                         | 32 +++++++++++++++++-------
+ target/linux/qualcommax/image/ipq807x.mk |  4 +++
+ 3 files changed, 29 insertions(+), 10 deletions(-)
+
+diff --git a/ews377ap-v3-port/build-skus.sh b/ews377ap-v3-port/build-skus.sh
+index c1bf2b9a9e..3f0fbc713f 100755
+--- a/ews377ap-v3-port/build-skus.sh
++++ b/ews377ap-v3-port/build-skus.sh
+@@ -1,11 +1,12 @@
+ #!/bin/bash
+ # Build each ap-hk07 SKU as its own single-profile build so each image ships
+ # only its own ipq-wifi board file (multi-profile builds share one rootfs).
++# Usage: build-skus.sh [sku ...]   (default: all three)
+ 
+ cd "${TREE:-$HOME/owrt-build-tree}" || exit 1
+ TREE=$PWD
+ OUT=${OUT:-$HOME/release}; rm -rf $OUT; mkdir -p $OUT
+-for dev in ews377ap-v3 ecw230v3 ews377-fit; do
++for dev in ${@:-ews377ap-v3 ecw230v3 ews377-fit}; do
+   sed -i -E "/^CONFIG_TARGET_(qualcommax_ipq807x_)?DEVICE_engenius_/d; /^CONFIG_TARGET_PROFILE=/d; /^CONFIG_DEFAULT_ipq-wifi-engenius/d; /^CONFIG_PACKAGE_ipq-wifi-engenius/d; /^# CONFIG_TARGET_PROFILE/d" .config
+   { echo "CONFIG_TARGET_qualcommax_ipq807x_DEVICE_engenius_$dev=y"; echo "CONFIG_PACKAGE_ipq-wifi-engenius_$dev=y"; } >> .config
+   make defconfig >/dev/null 2>&1
+diff --git a/scripts/mkits.sh b/scripts/mkits.sh
+index fc2b580ee2..ef7fbde073 100755
+--- a/scripts/mkits.sh
++++ b/scripts/mkits.sh
+@@ -196,6 +196,27 @@ OVCONFIGS=""
+ 	"
+ done
+ 
++# A comma-separated -c list emits one configuration per name (the first is the
++# default), all pointing at the same kernel/fdt. Some OEM u-boot builds select the
++# FIT configuration by board name, and the right name differs between SKUs.
++CONFIGS=""
++DEFAULT_CONFIG=""
++OLDIFS=$IFS
++IFS=,
++for cfg in $CONFIG; do
++	[ -n "$DEFAULT_CONFIG" ] || DEFAULT_CONFIG=$cfg
++	CONFIGS="$CONFIGS
++		$cfg {
++			description = \"OpenWrt ${DEVICE}\";
++			kernel = \"kernel${REFERENCE_CHAR}1\";
++			${FDT_PROP}
++			${LOADABLES:+loadables = ${LOADABLES};}
++			${COMPATIBLE_PROP}
++			${INITRD_PROP}
++		};"
++done
++IFS=$OLDIFS
++
+ # Create a default, fully populated DTS file
+ DATA="/dts-v1/;
+ 
+@@ -227,15 +248,8 @@ ${ROOTFS_NODE}
+ 	};
+ 
+ 	configurations {
+-		default = \"${CONFIG}\";
+-		${CONFIG} {
+-			description = \"OpenWrt ${DEVICE}\";
+-			kernel = \"kernel${REFERENCE_CHAR}1\";
+-			${FDT_PROP}
+-			${LOADABLES:+loadables = ${LOADABLES};}
+-			${COMPATIBLE_PROP}
+-			${INITRD_PROP}
+-		};
++		default = \"${DEFAULT_CONFIG}\";
++		${CONFIGS}
+ 		${OVCONFIGS}
+ 	};
+ };"
+diff --git a/target/linux/qualcommax/image/ipq807x.mk b/target/linux/qualcommax/image/ipq807x.mk
+index d9f979f320..9960839cbf 100644
+--- a/target/linux/qualcommax/image/ipq807x.mk
++++ b/target/linux/qualcommax/image/ipq807x.mk
+@@ -229,6 +229,10 @@ define Device/engenius_ecw230v3
+ 	$(call Device/engenius_ap-hk07)
+ 	DEVICE_MODEL := ECW230v3
+ 	DEVICE_DTS := ipq8072-engenius-ecw230v3
++	# ECW230v3 stock firmware (kernel 5.4) ships its FIT with default config@hk08;
++	# no ECW unit has been bench-tested, so carry both names and let the OEM
++	# u-boot pick (same kernel + DTB behind each).
++	DEVICE_DTS_CONFIG := config@hk07,config@hk08
+ 	DEVICE_PACKAGES += ipq-wifi-engenius_ecw230v3
+ ifeq ($(IB),)
+ ifneq ($(CONFIG_TARGET_ROOTFS_INITRAMFS),)

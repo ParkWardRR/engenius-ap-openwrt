@@ -1,0 +1,75 @@
+From d8c55faa2711b5b151879392312ae90d7a2c8514 Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 18:05:35 -0800
+Subject: [PATCH 38/50] mac80211: let ath11k build without NSS, and restore
+ ath11k-pci autoload
+
+Two fixes, both found by bringing up the ECW336 on hardware.
+
+1. The NSS patch series does not compile with CPTCFG_ATH11K_NSS_SUPPORT
+   off: core.h puts the nss members of struct ath11k_vif and struct ath11k
+   behind the ifdef, while mac.c's AP_VLAN, WDS and dynamic-VLAN paths
+   (patches 207/211/235/341) dereference arvif->nss unguarded in ~10 places,
+   giving 7 instances of
+
+     error: 'struct ath11k_vif' has no member named 'nss'
+
+   Make both members unconditional, matching struct ath11k_peer, whose nss
+   member the same series already adds unguarded. The types come from nss.h,
+   which core.h includes unconditionally and which defines the structs
+   outside its own ifdef, so this needs nothing else. Costs a few bytes per
+   vif/pdev when NSS is off.
+
+   This matters because the NSS data plane is unusable on the ECW336 (it
+   kills the Ethernet port and wedges ath11k's copy-engine setup), so
+   building without it is currently the only way to get a working image --
+   and with it off, all three radios come up.
+
+2. kmod-ath11k-pci was missing AUTOLOAD, which upstream OpenWrt has, so the
+   PCIe radio driver never loaded at boot and the ECW336's QCN9074 6 GHz
+   radio stayed down; modprobing it by hand brought phy2 up immediately.
+---
+ package/kernel/mac80211/ath.mk                            | 1 +
+ .../nss/ath11k/199-003-ath11k-add-nss-support.patch       | 8 ++++----
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/package/kernel/mac80211/ath.mk b/package/kernel/mac80211/ath.mk
+index 5943a55a6d..fbb4173013 100644
+--- a/package/kernel/mac80211/ath.mk
++++ b/package/kernel/mac80211/ath.mk
+@@ -485,6 +485,7 @@ define KernelPackage/ath11k-pci
+   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath11k
+   DEPENDS+= @PCI_SUPPORT +kmod-qrtr-mhi +kmod-ath11k
+   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_pci.ko
++  AUTOLOAD:=$(call AutoProbe,ath11k_pci)
+ endef
+ 
+ define KernelPackage/ath11k-pci/description
+diff --git a/package/kernel/mac80211/patches/nss/ath11k/199-003-ath11k-add-nss-support.patch b/package/kernel/mac80211/patches/nss/ath11k/199-003-ath11k-add-nss-support.patch
+index e6b5c7460d..505f117aa1 100644
+--- a/package/kernel/mac80211/patches/nss/ath11k/199-003-ath11k-add-nss-support.patch
++++ b/package/kernel/mac80211/patches/nss/ath11k/199-003-ath11k-add-nss-support.patch
+@@ -183,9 +183,9 @@ index 775904f..17f46cb 100644
+  
+  	struct ath11k_reg_tpc_power_info reg_tpc_info;
+  	struct ath11k_mgmt_frame_stats mgmt_stats;
+-+#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+++	/* unconditional: mac.c's AP_VLAN/WDS paths deref arvif->nss unguarded */
+++	/* (was #ifdef CPTCFG_ATH11K_NSS_SUPPORT) */
+ +	struct arvif_nss nss;
+-+#endif
+  	/* Must be last - ends in a flexible-array member.
+  	 *
+  	 * FIXME: Driver should not copy struct ieee80211_chanctx_conf,
+@@ -203,9 +203,9 @@ index 775904f..17f46cb 100644
+  	struct ath11k_pdev *pdev;
+  	struct ieee80211_hw *hw;
+  	struct ath11k_pdev_wmi *wmi;
+-+#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+++	/* unconditional, to match struct ath11k_vif above */
+++	/* (was #ifdef CPTCFG_ATH11K_NSS_SUPPORT) */
+ +	struct ath11k_nss nss;
+-+#endif
+  	struct ath11k_pdev_dp dp;
+  	u8 mac_addr[ETH_ALEN];
+  	struct ath11k_he ar_he;

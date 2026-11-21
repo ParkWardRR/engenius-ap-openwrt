@@ -1,0 +1,48 @@
+From bedf725ad655210d289df77b53f3ff76441df29b Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 22:37:44 -0800
+Subject: [PATCH 46/50] nss-tools: do not symlink the core-1 firmware off
+ Hawkeye
+
+Review follow-up to the compat symlinks. nss-firmware installs
+qca-nss1-retail.bin only under $(if $(filter HK,$(NSS_SOC))), because
+ipq60xx has a single NSS core and never requests a second image - so an
+unconditional qca-nss1.bin symlink dangles there. Gate it on the
+ipq807x subtarget.
+
+No effect on the ECW336 (Hawkeye, both files present), which is why the
+image already built and verified is unaffected. Also note in the comment
+that qca-nss{0,1}-retail.bin are themselves nss-firmware's stable
+aliases for the selected 11.4 / 12.5 line, which is what makes pointing
+at them version-proof rather than a guess.
+---
+ package/nss/nss-tools/Makefile | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/package/nss/nss-tools/Makefile b/package/nss/nss-tools/Makefile
+index f0bfa6a4bf..8940bb0dd1 100644
+--- a/package/nss/nss-tools/Makefile
++++ b/package/nss/nss-tools/Makefile
+@@ -97,11 +97,19 @@ define Package/nss-tools/install
+ 	#   request_firmware failed with err code: -110
+ 	#   qca-nss 39000000.nss: probe with driver qca-nss failed with error -110
+ 	# so NSS never starts at all: no data plane for armed ports, and ath11k
+-	# with nss_offload=1 registers against a core that is not there. Point the
+-	# names the driver asks for at whichever line nss-firmware selected.
++	# with nss_offload=1 registers against a core that is not there.
++	#
++	# Point the names the driver asks for at qca-nss{0,1}-retail.bin, which are
++	# themselves nss-firmware's stable aliases for whichever of the 11.4 / 12.5
++	# lines was selected, so this stays correct across that choice.
++	#
++	# Core 1 exists only on Hawkeye: nss-firmware installs qca-nss1-retail.bin
++	# under $(if $(filter HK,$(NSS_SOC))), so symlinking it unconditionally
++	# would dangle on ipq60xx - one NSS core, second image never requested.
+ 	$(INSTALL_DIR) $(1)/lib/firmware
+ 	$(LN) qca-nss0-retail.bin $(1)/lib/firmware/qca-nss0.bin
+-	$(LN) qca-nss1-retail.bin $(1)/lib/firmware/qca-nss1.bin
++	$(if $(CONFIG_TARGET_qualcommax_ipq807x),$(LN) qca-nss1-retail.bin \
++		$(1)/lib/firmware/qca-nss1.bin)
+ 	$(INSTALL_DIR) $(1)/usr/sbin
+ 	$(INSTALL_BIN) ./files/nss-up $(1)/usr/sbin/nss-up
+ 	$(INSTALL_BIN) ./files/nss-status $(1)/usr/sbin/nss-status

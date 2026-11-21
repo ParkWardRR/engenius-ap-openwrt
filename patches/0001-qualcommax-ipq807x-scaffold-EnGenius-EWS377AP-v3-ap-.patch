@@ -1,0 +1,318 @@
+From 271c95fc6b1114bd0917f174e6aba6172885f25d Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Wed, 2 Sep 2026 02:04:09 -0700
+Subject: [PATCH 01/50] qualcommax: ipq807x: scaffold EnGenius EWS377AP v3
+ (ap-hk07) port
+
+Add DTS, image recipe, and ipq-wifi package entry for the EnGenius
+EWS377AP v3 (IPQ8072A), derived from the EAP660HD template as a starting
+point for the Target C NSS-EDMA port. Hardware-specific values (GPIOs,
+PHY/uplink, WiFi board data, install format) are marked TODO(extract)
+pending OEM DTS + firmware extraction. See PORT-STATUS-ews377ap-v3.md.
+---
+ PORT-STATUS-ews377ap-v3.md                    |  50 +++++
+ package/firmware/ipq-wifi/Makefile            |   4 +
+ .../dts/ipq8072-engenius-ews377ap-v3.dts      | 176 ++++++++++++++++++
+ target/linux/qualcommax/image/ipq807x.mk      |  27 +++
+ 4 files changed, 257 insertions(+)
+ create mode 100644 PORT-STATUS-ews377ap-v3.md
+ create mode 100644 target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts
+
+diff --git a/PORT-STATUS-ews377ap-v3.md b/PORT-STATUS-ews377ap-v3.md
+new file mode 100644
+index 0000000000..b5d704bf4a
+--- /dev/null
++++ b/PORT-STATUS-ews377ap-v3.md
+@@ -0,0 +1,50 @@
++# Port status — EnGenius EWS377AP v3 (`ap-hk07`, IPQ8072A)
++
++Target **C** (NSS-EDMA) port, on branch `ews377ap-v3`, forked from
++`JuliusBairaktaris/openwrt-nss-edma` (NSS offload on the **upstream** qca_edma/qca_ppe stack).
++
++This is a **scaffold**, not a working build. It establishes the file skeleton from the closest
++in-tree template so the remaining work is "fill in verified hardware values," not "start from zero."
++
++## Why this template
++
++`ipq8072-eap660hd-v1.dts` (TP-Link EAP660 HD v1) is the closest in-tree device: same IPQ8072,
++dual-band 4×4, single 2.5 GbE uplink (QCA8081 @ 2500base-x), NAND with `qcom,smem-part`. The
++EWS377AP v3 board `ap-hk07` is a Qualcomm HK reference derivative, as is EAP660HD — so most of the
++DTS should transfer. Every transferred value is marked `TODO(extract)` until confirmed on hardware.
++
++## Files added
++
++| File | State |
++|---|---|
++| `target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts` | scaffold from EAP660HD; placeholders flagged |
++| `target/linux/qualcommax/image/ipq807x.mk` — `Device/engenius_ews377ap-v3` | FitImage + UbiFit sysupgrade; factory (senao-header) stubbed |
++| `package/firmware/ipq-wifi/Makefile` — `ipq-wifi-engenius_ews377ap-v3` | package registered; **board-2.bin not yet supplied** |
++
++## Blocking unknowns — need hardware extraction (UART / de-obfuscated OEM firmware)
++
++These must be pulled from the OEM device tree + `/lib/firmware/IPQ8074` and substituted before a
++build is trustworthy (see the extraction plan in the `ews377apv3-openwrt` planning repo):
++
++1. **Secure-boot fuse state** — go/no-go for booting any custom image at all.
++2. **GPIOs** — status/power/per-band LED lines + colors; reset button; PHY reset. (placeholders inherited)
++3. **Ethernet uplink** — PHY model + MDIO address + ESS port index + link speed. (EAP660HD values assumed)
++4. **WiFi board data** — extract OEM `board-2.bin`/`bdwlan` → repackage with the correct board-ID as
++   `package/firmware/ipq-wifi/board-engenius_ews377ap-v3.*`, and make the DTS
++   `qcom,ath11k-calibration-variant` string match it.
++5. **Install format** — verify the exact `mksenaofw` flag mapping (vendor 0x0101 / product 0x011a)
++   against a de-obfuscated OEM `.bin` before shipping the factory image.
++
++## Suggested next steps (in order)
++
++1. Extract OEM DTS + `/lib/firmware/IPQ8074` from a de-obfuscated stock image (offline, no hardware) —
++   fill in items 2–4 above from real data.
++2. Hook up UART (header J2, 3.3V, 115200 8N1); run the secure-boot check (item 1); TFTP an initramfs
++   build of this branch to prove console + Ethernet non-destructively.
++3. Iterate DTS until console/Ethernet/WiFi come up; then test sysupgrade to a non-OEM slot.
++4. Only then layer/verify the NSS-EDMA offload gates (see Phase 7 in the planning repo).
++
++## Recovery
++
++Dual A/B OEM slots + UART + TFTP. Keep one OEM slot intact. Back up mtd11 (ART) before any flash —
++its corruption is a real brick.
+diff --git a/package/firmware/ipq-wifi/Makefile b/package/firmware/ipq-wifi/Makefile
+index c58198e693..21b514b2af 100644
+--- a/package/firmware/ipq-wifi/Makefile
++++ b/package/firmware/ipq-wifi/Makefile
+@@ -42,6 +42,7 @@ ALLWIFIBOARDS:= \
+ 	dynalink_dl-wrx36 \
+ 	edgecore_eap102 \
+ 	edimax_cax1800 \
++	engenius_ews377ap-v3 \
+ 	elecom_wrc-x3000gs2 \
+ 	glinet_gl-ax1800 \
+ 	glinet_gl-axt1800 \
+@@ -248,6 +249,9 @@ $(eval $(call generate-ipq-wifi-package,compex_wpq873,Compex WPQ-873))
+ $(eval $(call generate-ipq-wifi-package,dynalink_dl-wrx36,Dynalink DL-WRX36))
+ $(eval $(call generate-ipq-wifi-package,edgecore_eap102,Edgecore EAP102))
+ $(eval $(call generate-ipq-wifi-package,edimax_cax1800,Edimax CAX1800))
++# SCAFFOLD: requires board-engenius_ews377ap-v3.* (the OEM board-2.bin
++# extracted from /lib/firmware/IPQ8074), not yet committed. See PORT-STATUS.md.
++$(eval $(call generate-ipq-wifi-package,engenius_ews377ap-v3,EnGenius EWS377AP v3))
+ $(eval $(call generate-ipq-wifi-package,elecom_wrc-x3000gs2,ELECOM WRC-X3000GS2))
+ $(eval $(call generate-ipq-wifi-package,glinet_gl-ax1800,GL.iNet GL-AX1800))
+ $(eval $(call generate-ipq-wifi-package,glinet_gl-axt1800,GL.iNet GL-AXT1800))
+diff --git a/target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts b/target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts
+new file mode 100644
+index 0000000000..a378cd9143
+--- /dev/null
++++ b/target/linux/qualcommax/dts/ipq8072-engenius-ews377ap-v3.dts
+@@ -0,0 +1,176 @@
++// SPDX-License-Identifier: GPL-2.0-or-later OR BSD-2-Clause
++/*
++ * EnGenius EWS377AP v3  (Qualcomm IPQ8072A, board "ap-hk07")
++ *
++ * SCAFFOLD — derived from ipq8072-eap660hd-v1.dts (TP-Link EAP660 HD v1),
++ * the closest in-tree IPQ8072 4x4 AP. Values marked TODO(extract) are
++ * INHERITED PLACEHOLDERS and MUST be verified against the OEM device tree
++ * pulled off real hardware (see UART/firmware extraction plan) before this
++ * boots reliably. Do not treat this as validated.
++ */
++
++/dts-v1/;
++
++#include "ipq8074.dtsi"
++#include "ipq8074-nss.dtsi"
++#include "ipq8074-hk-cpu.dtsi"
++#include "ipq8074-ess.dtsi"
++#include <dt-bindings/leds/common.h>
++#include <dt-bindings/input/input.h>
++#include <dt-bindings/gpio/gpio.h>
++
++/ {
++	model = "EnGenius EWS377AP v3";
++	compatible = "engenius,ews377ap-v3", "qcom,ipq8074";
++
++	aliases {
++		serial0 = &blsp1_uart5;
++		led-boot = &led_status;
++		led-failsafe = &led_status;
++		led-running = &led_status;
++		led-upgrade = &led_status;
++	};
++
++	chosen {
++		stdout-path = "serial0,115200n8";
++		bootargs-append = " root=/dev/ubiblock0_1";
++	};
++
++	keys {
++		compatible = "gpio-keys";
++
++		/* TODO(extract): confirm reset-button GPIO from OEM DTS */
++		reset {
++			label = "reset";
++			gpios = <&tlmm 50 GPIO_ACTIVE_LOW>;
++			linux,code = <KEY_RESTART>;
++		};
++	};
++
++	leds {
++		compatible = "gpio-leds";
++
++		/*
++		 * TODO(extract): EWS377AP v3 has multiple status LEDs (power +
++		 * per-band). Only a single status LED is scaffolded here; map the
++		 * real GPIOs/colors from the OEM DTS + /sys/class/leds.
++		 */
++		led_status: status {
++			function = LED_FUNCTION_STATUS;
++			gpios = <&tlmm 42 GPIO_ACTIVE_HIGH>;
++			color = <LED_COLOR_ID_BLUE>;
++		};
++	};
++};
++
++&blsp1_uart5 {
++	status = "okay";
++};
++
++&tlmm {
++	mdio_pins: mdio-pins {
++		mdc {
++			pins = "gpio68";
++			function = "mdc";
++			drive-strength = <8>;
++			bias-pull-up;
++		};
++
++		mdio {
++			pins = "gpio69";
++			function = "mdio";
++			drive-strength = <8>;
++			bias-pull-up;
++		};
++	};
++};
++
++&mdio {
++	status = "okay";
++	pinctrl-0 = <&mdio_pins>;
++	pinctrl-names = "default";
++	/* TODO(extract): confirm PHY reset GPIO */
++	reset-gpios = <&tlmm 25 GPIO_ACTIVE_LOW>;
++
++	/*
++	 * TODO(extract): EWS377AP v3 uplink is a single 2.5GbE PoE port.
++	 * Confirm the PHY model + MDIO address from the OEM DTS. EAP660HD uses
++	 * a QCA8081 at addr 28; the EWS377 is the same reference-design class
++	 * but the address must be verified.
++	 */
++	qca8081_28: ethernet-phy@28 {
++		compatible = "ethernet-phy-ieee802.3-c22";
++		reg = <28>;
++	};
++};
++
++&uniphy1 {
++	status = "okay";
++};
++
++&switch {
++	status = "okay";
++
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			ethernet = <&edma>;
++			phy-mode = "internal";
++
++			fixed-link {
++				speed = <1000>;
++				full-duplex;
++			};
++		};
++
++		/* TODO(extract): confirm ESS port index + link speed for the uplink */
++		swport5: port@5 {
++			reg = <5>;
++			label = "lan";
++			phy-handle = <&qca8081_28>;
++			phy-mode = "2500base-x";
++			pcs-handle = <&uniphy1 0>;
++		};
++	};
++};
++
++&edma {
++	status = "okay";
++};
++
++&qpic_bam {
++	status = "okay";
++};
++
++&qpic_nand {
++	status = "okay";
++
++	nand@0 {
++		reg = <0>;
++		nand-ecc-strength = <4>;
++		nand-ecc-step-size = <512>;
++		nand-bus-width = <8>;
++
++		/*
++		 * OEM firmware is QSDK OpenWrt and defines the partition table in
++		 * SMEM, so the layout (DEVCFG/APPSBLENV/APPSBL/cert/ART/rootfs A/B)
++		 * is read automatically here — no hand-written offsets needed.
++		 */
++		partitions {
++			compatible = "qcom,smem-part";
++		};
++	};
++};
++
++&wifi {
++	status = "okay";
++	/*
++	 * TODO(extract): this string must match the board-data variant inside
++	 * the board-2.bin supplied by package ipq-wifi-engenius_ews377ap-v3,
++	 * which itself must be built from the OEM /lib/firmware/IPQ8074 BDF.
++	 */
++	qcom,ath11k-calibration-variant = "EnGenius-EWS377AP-v3";
++};
+diff --git a/target/linux/qualcommax/image/ipq807x.mk b/target/linux/qualcommax/image/ipq807x.mk
+index da99112f5c..265df64f3f 100644
+--- a/target/linux/qualcommax/image/ipq807x.mk
++++ b/target/linux/qualcommax/image/ipq807x.mk
+@@ -191,6 +191,33 @@ define Device/edimax_cax1800
+ endef
+ TARGET_DEVICES += edimax_cax1800
+ 
++# SCAFFOLD — EnGenius EWS377AP v3 (IPQ8072A, board ap-hk07).
++# The FitImage/UbiFit sysupgrade path is the primary install route once
++# OpenWrt is running. The web-ui-factory.bin wraps the image in a Senao
++# header so the OEM LuCI updater accepts it (check_senao_image_header.sh
++# gates on vendor_id + product_id only):
++#   vendor_id  257 (0x0101)   product_id 282 (0x011a)  -> EWS377AP v3
++# Confirm the exact mksenaofw flag mapping against a de-obfuscated OEM .bin
++# before relying on the factory image; the sysupgrade path is what to test
++# first (via u-boot / a shelled OEM slot).
++define Device/engenius_ews377ap-v3
++	$(call Device/FitImage)
++	$(call Device/UbiFit)
++	DEVICE_VENDOR := EnGenius
++	DEVICE_MODEL := EWS377AP
++	DEVICE_VARIANT := v3
++	BLOCKSIZE := 128k
++	PAGESIZE := 2048
++	SOC := ipq8072
++	DEVICE_PACKAGES := ipq-wifi-engenius_ews377ap-v3
++	# TODO(install): add Senao-header factory image once flag mapping is
++	# verified, e.g.:
++	#   IMAGES += web-ui-factory.bin
++	#   IMAGE/web-ui-factory.bin := append-ubi | \
++	#       senao-header -v 0x0101 -p 0x011a -t 0
++endef
++TARGET_DEVICES += engenius_ews377ap-v3
++
+ define Device/linksys_homewrk
+ 	$(call Device/FitImage)
+ 	$(call Device/UbiFit)

@@ -1,0 +1,175 @@
+From d7394ee152a3ec343bbeffaca7e6f712dda7bde4 Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 19:05:49 -0800
+Subject: [PATCH 41/50] ath11k: move the nss-member fix to a late patch, and
+ re-enable the NSS runtime
+
+Editing 199-003 in place to unguard the nss members broke a later patch in
+the series (the one adding bss_peer inside the same ifdef), which then failed
+to apply: 'Hunk #1 FAILED at 710 ... core.h.rej'. Revert that edit and do it
+as 999-941 instead, generated with diff against the fully-patched tree so the
+context is exact.
+
+Also adds 999-940, which prints the skb geometry when a CE rx buffer fails to
+map -- that failure turned out to be a cascade from missing calibration data
+rather than an NSS bug, but the warning as shipped says nothing useful about
+which pipe or what the skb looked like.
+
+And drops -nss-tools from the ECW336: with the caldata and 02_network fixes
+in place, an NSS-enabled build comes up with all three radios (R_PHYN=3), no
+swiotlb or HTC failures, and Ethernet passing traffic at 0.4 ms, so the
+earlier reason for excluding the runtime no longer holds.
+---
+ .../199-003-ath11k-add-nss-support.patch      |  8 ++--
+ ...rt-skb-geometry-on-ce-rx-map-failure.patch | 38 +++++++++++++++
+ ...th11k-make-nss-members-unconditional.patch | 46 +++++++++++++++++++
+ target/linux/qualcommax/image/ipq807x.mk      |  9 +---
+ 4 files changed, 89 insertions(+), 12 deletions(-)
+ create mode 100644 package/kernel/mac80211/patches/nss/ath11k/999-940-ath11k-report-skb-geometry-on-ce-rx-map-failure.patch
+ create mode 100644 package/kernel/mac80211/patches/nss/ath11k/999-941-ath11k-make-nss-members-unconditional.patch
+
+diff --git a/package/kernel/mac80211/patches/nss/ath11k/199-003-ath11k-add-nss-support.patch b/package/kernel/mac80211/patches/nss/ath11k/199-003-ath11k-add-nss-support.patch
+index 505f117aa1..e6b5c7460d 100644
+--- a/package/kernel/mac80211/patches/nss/ath11k/199-003-ath11k-add-nss-support.patch
++++ b/package/kernel/mac80211/patches/nss/ath11k/199-003-ath11k-add-nss-support.patch
+@@ -183,9 +183,9 @@ index 775904f..17f46cb 100644
+  
+  	struct ath11k_reg_tpc_power_info reg_tpc_info;
+  	struct ath11k_mgmt_frame_stats mgmt_stats;
+-+	/* unconditional: mac.c's AP_VLAN/WDS paths deref arvif->nss unguarded */
+-+	/* (was #ifdef CPTCFG_ATH11K_NSS_SUPPORT) */
+++#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ +	struct arvif_nss nss;
+++#endif
+  	/* Must be last - ends in a flexible-array member.
+  	 *
+  	 * FIXME: Driver should not copy struct ieee80211_chanctx_conf,
+@@ -203,9 +203,9 @@ index 775904f..17f46cb 100644
+  	struct ath11k_pdev *pdev;
+  	struct ieee80211_hw *hw;
+  	struct ath11k_pdev_wmi *wmi;
+-+	/* unconditional, to match struct ath11k_vif above */
+-+	/* (was #ifdef CPTCFG_ATH11K_NSS_SUPPORT) */
+++#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ +	struct ath11k_nss nss;
+++#endif
+  	struct ath11k_pdev_dp dp;
+  	u8 mac_addr[ETH_ALEN];
+  	struct ath11k_he ar_he;
+diff --git a/package/kernel/mac80211/patches/nss/ath11k/999-940-ath11k-report-skb-geometry-on-ce-rx-map-failure.patch b/package/kernel/mac80211/patches/nss/ath11k/999-940-ath11k-report-skb-geometry-on-ce-rx-map-failure.patch
+new file mode 100644
+index 0000000000..a1fdb56e40
+--- /dev/null
++++ b/package/kernel/mac80211/patches/nss/ath11k/999-940-ath11k-report-skb-geometry-on-ce-rx-map-failure.patch
+@@ -0,0 +1,38 @@
++From: Orsavio P. Delmare <orsavio@delmare.lu>
++Subject: [PATCH] ath11k: report skb geometry when a CE rx buffer fails to map
++
++On the EnGenius ECW336 (IPQ8072A), an NSS-enabled build fails firmware
++bring-up with a DMA map length of ~4 GiB on the first CE rx post:
++
++  ath11k c000000.wifi: swiotlb buffer is full (sz: 4294965184 bytes), total 512 (slots), used 0 (slots)
++  ath11k c000000.wifi: failed to dma map ce rx buf
++  ath11k c000000.wifi: failed to post rx buf to pipe: 1 err: -5
++  ath11k c000000.wifi: failed to connect to HTC: -110
++
++4294965184 is -2112 reinterpreted as a size_t, and 2112 is exactly
++2048 + NET_SKB_PAD, so skb_tailroom() is returning a large negative value for
++an skb that dev_alloc_skb() has just handed back -- i.e. skb->tail is past
++skb->end. The same geometry shows up as a fatal oops in the initramfs case.
++
++The warning as it stands says nothing about which pipe or what the skb looked
++like, which makes the bug impossible to attribute from a console log. Print the
++pipe, the configured buffer size and the skb's geometry so the next failure
++says whether buf_sz, the allocation, or the skb itself is wrong.
++
++This is diagnostic only; drop it once the root cause is fixed.
++
++--- a/drivers/net/wireless/ath/ath11k/ce.c
+++++ b/drivers/net/wireless/ath/ath11k/ce.c
++@@ -336,7 +336,11 @@ static int ath11k_ce_rx_post_pipe(struct ath11k_ce_pipe *pipe)
++ 				       skb->len + skb_tailroom(skb),
++ 				       DMA_FROM_DEVICE);
++ 		if (unlikely(dma_mapping_error(ab->dev, paddr))) {
++-			ath11k_warn(ab, "failed to dma map ce rx buf\n");
+++			ath11k_warn(ab,
+++				    "failed to dma map ce rx buf: pipe %u buf_sz %u skb len %u tailroom %d truesize %u tail %u end %u\n",
+++				    pipe->pipe_num, pipe->buf_sz, skb->len,
+++				    skb_tailroom(skb), skb->truesize,
+++				    skb->tail, skb->end);
++ 			dev_kfree_skb_any(skb);
++ 			ret = -EIO;
++ 			goto exit;
+diff --git a/package/kernel/mac80211/patches/nss/ath11k/999-941-ath11k-make-nss-members-unconditional.patch b/package/kernel/mac80211/patches/nss/ath11k/999-941-ath11k-make-nss-members-unconditional.patch
+new file mode 100644
+index 0000000000..afccafe451
+--- /dev/null
++++ b/package/kernel/mac80211/patches/nss/ath11k/999-941-ath11k-make-nss-members-unconditional.patch
+@@ -0,0 +1,46 @@
++From: Orsavio P. Delmare <orsavio@delmare.lu>
++Subject: [PATCH] ath11k: make the nss members unconditional so NSS=n builds
++
++The NSS series does not compile with CPTCFG_ATH11K_NSS_SUPPORT off: core.h
++puts the nss members of struct ath11k_vif and struct ath11k behind the ifdef,
++while mac.c's AP_VLAN, WDS and dynamic-VLAN paths (patches 207/211/235/341)
++dereference arvif->nss unguarded in about ten places, so the build dies with
++
++  error: 'struct ath11k_vif' has no member named 'nss'   (x7)
++
++Drop the guards rather than add ten #ifdefs. struct ath11k_peer already
++carries its nss member unguarded, so this only makes the three consistent;
++the types come from nss.h, which core.h includes unconditionally and which
++defines them outside its own ifdef. Costs a few bytes per vif/pdev when NSS
++is compiled out.
++
++This has to be a late patch: editing 199-003 in place changes context that
++later patches in the series rely on (notably the one adding bss_peer inside
++the same ifdef), and they then fail to apply.
++
++--- a/drivers/net/wireless/ath/ath11k/core.h
+++++ b/drivers/net/wireless/ath/ath11k/core.h
++@@ -458,9 +458,10 @@
++ 
++ 	struct ath11k_reg_tpc_power_info reg_tpc_info;
++ 	struct ath11k_mgmt_frame_stats mgmt_stats;
++-#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+++	/* Deliberately not under CPTCFG_ATH11K_NSS_SUPPORT: mac.c's AP_VLAN,
+++	 * WDS and dynamic-VLAN paths dereference arvif->nss unguarded.
+++	 */
++ 	struct arvif_nss nss;
++-#endif
++ 	struct list_head ap_vlan_arvifs;
++ 	/* list required by Dynamic VLAN during fw_recovery */
++ 	struct list_head dyn_vlan_cfg;
++@@ -736,10 +737,8 @@
++ 	struct ath11k_pdev *pdev;
++ 	struct ieee80211_hw *hw;
++ 	struct ath11k_pdev_wmi *wmi;
++-#ifdef CPTCFG_ATH11K_NSS_SUPPORT
++ 	struct ath11k_nss nss;
++ 	struct ath11k_peer *bss_peer;
++-#endif
++ 	struct ath11k_pdev_dp dp;
++ 	u8 mac_addr[ETH_ALEN];
++ 	struct ath11k_he ar_he;
+diff --git a/target/linux/qualcommax/image/ipq807x.mk b/target/linux/qualcommax/image/ipq807x.mk
+index ec0b7d7c9a..9e5640581a 100644
+--- a/target/linux/qualcommax/image/ipq807x.mk
++++ b/target/linux/qualcommax/image/ipq807x.mk
+@@ -257,15 +257,8 @@ define Device/engenius_ecw336
+ 	# and hk01.c6 (the design's own name) are carried as cheap aliases in
+ 	# case the OEM u-boot asks for either.
+ 	DEVICE_DTS_CONFIG := config@hk07,config@hk08,config@hk01.c6
+-	# -nss-tools: on this board, arming the NSS firmware data plane kills the
+-	# network. Observed on hardware 2026-11-20: as soon as the port comes up
+-	# under netifd, qca-ppe-nss moves "port 5 on NSS fw data plane (vsi 1)",
+-	# the link reports 1Gbps/Full, and all traffic stops (100% ping loss).
+-	# The service refuses to detach at runtime ("reboot to return to the host
+-	# stack"), so ship without it until the NSS plane is debugged here; the
+-	# ath11k NSS patches stay compiled in and inert (nss_offload=0).
+ 	DEVICE_PACKAGES += kmod-ath11k-pci ath11k-firmware-qcn9074 \
+-		ipq-wifi-engenius_ecw336 kmod-leds-ipq-ledc -nss-tools
++		ipq-wifi-engenius_ecw336 kmod-leds-ipq-ledc
+ ifeq ($(IB),)
+ ifneq ($(CONFIG_TARGET_ROOTFS_INITRAMFS),)
+ 	ARTIFACTS += senao-factory.bin

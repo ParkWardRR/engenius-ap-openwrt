@@ -1,0 +1,66 @@
+From 58c74203dd005c68af9f7874ebc284980d21a29e Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 16:16:48 -0800
+Subject: [PATCH 35/50] qualcommax: ipq807x: make ECW336 sysupgrade
+ slot-correct
+
+This board's SMEM labels are absolute -- 'rootfs' is always slot 0
+(0x1000000) and 'rootfs_1' always slot 1 (0x87c0000) whichever slot u-boot
+booted, because the DT asks for the qcom,smem-part parser and so never sees
+the slot-relative mtdparts the OEM u-boot hands its own kernel.
+
+nand_do_upgrade's CI_UBIPART therefore defaults to 'rootfs', which from a
+slot-1 install would erase the OTHER slot -- the stock image kept as the
+rollback. Resolve the partition from the MTD that ubi0 is attached to
+instead, which is correct by construction for whichever slot is running.
+
+Prerequisite for running OpenWrt out of slot 1 at all; harmless on slot 0,
+where it resolves to the same 'rootfs'.
+---
+ .../base-files/lib/upgrade/platform.sh        | 25 ++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh b/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
+index dc95845172..71b12a0539 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
++++ b/target/linux/qualcommax/ipq807x/base-files/lib/upgrade/platform.sh
+@@ -4,6 +4,26 @@ REQUIRE_IMAGE_METADATA=1
+ RAMFS_COPY_BIN='fw_printenv fw_setenv head seq'
+ RAMFS_COPY_DATA='/etc/fw_env.config /var/lock/fw_printenv.lock'
+ 
++engenius_ecw336_ubipart() {
++	# The ECW336 is an A/B board whose SMEM partition labels are ABSOLUTE:
++	# "rootfs" is always slot 0 (0x1000000) and "rootfs_1" always slot 1
++	# (0x87c0000), whichever slot u-boot booted. (The slot-relative mtdparts
++	# the OEM u-boot hands its own kernel is not used here -- the DT asks for
++	# the qcom,smem-part parser.) So the default CI_UBIPART of "rootfs" would
++	# make a sysupgrade from a slot-1 install overwrite the OTHER slot.
++	#
++	# Resolve it instead from the MTD that ubi0 is actually attached to, which
++	# is true by construction for whichever slot is running.
++	local mtdnum part
++
++	mtdnum="$(cat /sys/class/ubi/ubi0/mtd_num 2>/dev/null)"
++	if [ -n "$mtdnum" ]; then
++		part="$(sed -ne "s/^mtd${mtdnum}: [0-9a-f]* [0-9a-f]* \"\(.*\)\"$/\1/p" /proc/mtd)"
++	fi
++
++	echo "${part:-rootfs}"
++}
++
+ xiaomi_initramfs_prepare() {
+ 	# Wipe UBI if running initramfs
+ 	[ "$(rootfs_type)" = "tmpfs" ] || return 0
+@@ -179,8 +199,11 @@ platform_do_upgrade() {
+ 	compex,wpq873|\
+ 	dynalink,dl-wrx36|\
+ 	edimax,cax1800|\
++	engenius,ecw336)
++		CI_UBIPART="$(engenius_ecw336_ubipart)"
++		nand_do_upgrade "$1"
++		;;
+ 	engenius,ecw230v3|\
+-	engenius,ecw336|\
+ 	engenius,ews377ap-v3|\
+ 	engenius,ews377-fit|\
+ 	netgear,rax120v2|\

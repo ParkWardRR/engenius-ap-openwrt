@@ -1,0 +1,27 @@
+From 1a9c2c036f2040ece075799f91b87c1c911e3ae3 Mon Sep 17 00:00:00 2001
+From: ParkWardRR <alfa147x@gmail.com>
+Date: Sun, 6 Sep 2026 11:39:55 -0700
+Subject: [PATCH 12/50] mac80211: ath11k-ahb: add missing AUTOLOAD (fixes wifi
+ not loading at boot)
+
+kmod-ath11k-ahb had no AUTOLOAD (unlike ath11k-pci right below it), so
+ath11k_ahb.ko never loaded at boot and cfg80211/mac80211 never came up on
+AHB/IPQ807x devices (observed on EWS377AP v3 first boot: 'nl80211 not found').
+Mirror the pci variant with AutoProbe(ath11k_ahb). Firmware itself is fine
+(/lib/firmware/IPQ8074/board-2.bin already carries qmi-board-id=656 = 0x290).
+---
+ package/kernel/mac80211/ath.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/package/kernel/mac80211/ath.mk b/package/kernel/mac80211/ath.mk
+index c9ee7b3c54..5943a55a6d 100644
+--- a/package/kernel/mac80211/ath.mk
++++ b/package/kernel/mac80211/ath.mk
+@@ -471,6 +471,7 @@ define KernelPackage/ath11k-ahb
+   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath11k
+   DEPENDS+= @TARGET_qualcommax +kmod-ath11k +kmod-qrtr-smd
+   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko
++  AUTOLOAD:=$(call AutoProbe,ath11k_ahb)
+ endef
+ 
+ define KernelPackage/ath11k-ahb/description

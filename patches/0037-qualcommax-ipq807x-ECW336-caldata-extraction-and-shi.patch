@@ -1,0 +1,80 @@
+From 9e786a60a2612da8e4f109028ceb868e6a91e03b Mon Sep 17 00:00:00 2001
+From: "Orsavio P. Delmare" <orsavio@delmare.lu>
+Date: Fri, 20 Nov 2026 17:11:15 -0800
+Subject: [PATCH 37/50] qualcommax: ipq807x: ECW336 caldata extraction, and
+ ship without nss-tools
+
+Both found by booting the port on real hardware.
+
+1. The ECW336 was missing from 11-ath11k-caldata, so no cal-ahb-*.bin or
+   cal-pci-*.bin was ever produced and NO radio came up: ath11k logged
+   "failed to load board data file: -12" for the CALIBRATION BDF, then
+   "Coldboot Calibration timed out" and "radio is not up". Verified the fix
+   by extracting both blobs by hand on the unit --
+
+     dd if=/dev/mtd12 of=.../IPQ8074/hw2.0/cal-ahb-c000000.wifi.bin bs=512 skip=8   count=256
+     dd if=/dev/mtd12 of=.../QCN9074/hw1.0/cal-pci-0000:01:00.0.bin  bs=512 skip=308 count=256
+
+   -- after which all three radios registered (phy0 5 GHz, phy1 2.4 GHz,
+   phy2 6 GHz with 50 channels). Offsets match every other board here:
+   0x1000 for the internal pair, 0x26800 for the QCN9074, both in 0:art.
+   Note the SMEM label is lowercase "0:art" on this platform.
+
+   This also confirms the hand-built board-2.bin keys were right: both
+   radios report chip_id 0x0 / board_id 0xff, i.e. qmi-board-id=255.
+
+2. The NSS firmware data plane breaks networking on this board. When the
+   port comes up under netifd, qca-ppe-nss moves "port 5 on NSS fw data
+   plane (vsi 1)" and the link reports 1Gbps/Full, but every packet is lost;
+   with the address on the port before arming, the same link pings fine. The
+   nss service cannot detach at runtime. So exclude nss-tools for this device
+   until that is debugged -- the ath11k NSS patches remain compiled in and
+   inert (nss_offload reads 0).
+---
+ target/linux/qualcommax/image/ipq807x.mk                 | 9 ++++++++-
+ .../base-files/etc/hotplug.d/firmware/11-ath11k-caldata  | 4 ++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/target/linux/qualcommax/image/ipq807x.mk b/target/linux/qualcommax/image/ipq807x.mk
+index 144d3a5da1..9f74c24b69 100644
+--- a/target/linux/qualcommax/image/ipq807x.mk
++++ b/target/linux/qualcommax/image/ipq807x.mk
+@@ -257,8 +257,15 @@ define Device/engenius_ecw336
+ 	# and hk01.c6 (the design's own name) are carried as cheap aliases in
+ 	# case the OEM u-boot asks for either.
+ 	DEVICE_DTS_CONFIG := config@hk07,config@hk08,config@hk01.c6
++	# -nss-tools: on this board, arming the NSS firmware data plane kills the
++	# network. Observed on hardware 2026-11-20: as soon as the port comes up
++	# under netifd, qca-ppe-nss moves "port 5 on NSS fw data plane (vsi 1)",
++	# the link reports 1Gbps/Full, and all traffic stops (100% ping loss).
++	# The service refuses to detach at runtime ("reboot to return to the host
++	# stack"), so ship without it until the NSS plane is debugged here; the
++	# ath11k NSS patches stay compiled in and inert (nss_offload=0).
+ 	DEVICE_PACKAGES += kmod-ath11k-pci ath11k-firmware-qcn9074 \
+-		ipq-wifi-engenius_ecw336
++		ipq-wifi-engenius_ecw336 -nss-tools
+ ifeq ($(IB),)
+ ifneq ($(CONFIG_TARGET_ROOTFS_INITRAMFS),)
+ 	ARTIFACTS += senao-factory.bin
+diff --git a/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata b/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+index 12ab1ffbb6..d718633c98 100644
+--- a/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
++++ b/target/linux/qualcommax/ipq807x/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+@@ -27,6 +27,7 @@ case "$FIRMWARE" in
+ 	edgecore,eap102|\
+ 	edimax,cax1800|\
+ 	engenius,ecw230v3|\
++	engenius,ecw336|\
+ 	engenius,ews377ap-v3|\
+ 	engenius,ews377-fit|\
+ 	linksys,mx5300|\
+@@ -170,6 +171,9 @@ case "$FIRMWARE" in
+ "ath11k/QCN9074/hw1.0/cal-pci-0000:01:00.0.bin"|\
+ "ath11k/QCN9074/hw1.0/cal-pci-0001:01:00.0.bin")
+ 	case "$board" in
++	engenius,ecw336)
++		caldata_extract "0:art" 0x26800 0x20000
++		;;
+ 	linksys,mx8500)
+ 		caldata_extract "0:art" 0x26800 0x20000
+ 		ath11k_remove_regdomain
