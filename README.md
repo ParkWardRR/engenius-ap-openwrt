@@ -33,8 +33,8 @@ front LEDs, and NSS offload active with ECM acceleration.
 ## Build
 
 ```sh
-git clone https://github.com/ParkWardRR/engenius-ipq807x-openwrt.git
-cd engenius-ipq807x-openwrt
+git clone https://github.com/ParkWardRR/engenius-ap-openwrt.git
+cd engenius-ap-openwrt
 ./setup.sh                 # clones the pinned base, applies the series, wires feeds
 cd build-tree
 make menuconfig            # qualcommax / ipq807x, then a DEVICE_engenius_* profile
