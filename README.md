@@ -85,9 +85,24 @@ u-boot env `active_fw`, so a bad image is undone by flipping one variable.
   invalid and falls back to a Qualcomm dummy), so `env default -a` is permanent
   identity loss. A *valid-but-incomplete* env is the one thing that hard-bricks
   these boards.
-- **ECW230v3: check `cat /proc/mtd` first.** Units have been observed with the
-  `rootfs` / `rootfs_1` labels **reversed**, so an installer assuming offsets can
-  overwrite the running slot. Resolve partitions by name, never by index.
+- **`rootfs` is not an offset — it means "the slot I am running from".** The
+  A/B labels are *slot-relative* and swap with `active_fw`: booted from FW1,
+  `rootfs` is `0x1000000` and `rootfs_1` is `0x87c0000`; booted from FW2 those
+  same two names point the other way round. So `rootfs_1` is always the write
+  target and `rootfs` never is — but only if you read `/proc/mtd` **fresh**, on
+  the slot you are actually running. A remembered offset, or a capture from
+  before a slot switch, writes the live slot. (This is also what the "ECW230v3
+  labels are reversed" reports were: check, don't assume.)
+- `0:WIFIFW` is **per slot** too (FW1 `0x7ec0000`, FW2 `0xf680000`), so
+  restoring a slot to stock means writing both its rootfs *and* its wififw.
+- The env is **shared across slots**, which cuts both ways: a stock unit's
+  `cloud_id=3` private-cloud routing survived an OpenWrt excursion in the other
+  slot and came back for free — and equally, anything you change there persists
+  after you roll back.
+- Expect **one** failed controller check-in after rolling a slot back to stock:
+  the stock overlay does not keep its negotiated controller secret across the
+  excursion, so the AP re-negotiates once and then goes steady. The device
+  record stays registered and assigned.
 - Treat `0:ART` as read-only — it holds factory calibration and the MACs.
 
 ## Board identity: trust `compatible`, not the labels
@@ -138,8 +153,10 @@ FIT default.
   stock-firmware analysis, the no-brick flash procedure, bring-up runbooks
 - [engenius-field-guide](https://github.com/ParkWardRR/engenius-field-guide) —
   Senao/EnGenius firmware format, model codes, cross-flashing, self-hosting
-- [pelegrun-ap-hk07-firmware-tools](https://github.com/ParkWardRR/pelegrun-ap-hk07-firmware-tools) —
-  no-brick cross-flash and recovery toolkit for the AP-HK07 SKUs
+- [pelegrun](https://github.com/ParkWardRR/pelegrun-engenius-ews377-ecw230-firmware-tools) —
+  no-brick cross-flash and recovery toolkit for the AP-HK07 SKUs; it also reads
+  ECW336 images and envs, and refuses a re-head that would move an image across
+  the board boundary described above
 - [openwrt-engenius-nss-edma](https://github.com/ParkWardRR/openwrt-engenius-nss-edma) —
   the full build tree these patches came from, and where prebuilt images are
   published
