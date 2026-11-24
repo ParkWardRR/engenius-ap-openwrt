@@ -104,6 +104,21 @@ u-boot env `active_fw`, so a bad image is undone by flipping one variable.
   excursion, so the AP re-negotiates once and then goes steady. The device
   record stays registered and assigned.
 - Treat `0:ART` as read-only — it holds factory calibration and the MACs.
+- **The console header's pin order differs between these boards, so a harness
+  that worked on the last one can be silently backwards.** The EWS377-FIT and
+  EWS377AP v3 expose 4 pads **`V G T R`** (the FIT marks the `V` end with a
+  silkscreen arrow; the v3 silkscreens the header `J2 UART` and has a `UART_BT`
+  decoy beside it), and the **ECW336's order is mirrored relative to them**.
+  Wire `G`→GND, `T`→adapter RX, `R`→adapter TX, leave `V` open, and find the `V`
+  end from the arrow rather than the plug's shape — **never drive `V`** on a
+  PoE-powered unit. Moved in the same orientation it is dead in *both*
+  directions: measured `rx 1 B` against `tx 800 B` across a full reboot, with no
+  banner and the boot-menu keypress never arriving either. Three checks before
+  you blame the board: `rx` near zero while `tx` climbs means wiring, since any
+  powered IPQ807x prints a banner within ~10 s; a byte rate above **~11.5 KB/s**
+  at 115200 8N1 is impossible and means your capture tool is lying; and a
+  climbing `rx` only proves the *board's* TX, so send a bare CR and require a
+  login banner or `IPQ807x# ` back.
 
 ## Board identity: trust `compatible`, not the labels
 
